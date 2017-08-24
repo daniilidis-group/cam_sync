@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(poll_cameras)
+project(cam_sync)
 
 add_definitions(-std=c++11)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -14,7 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 generate_dynamic_reconfigure_options(
-  cfg/PollCameraDyn.cfg
+  cfg/CamSyncDynConfig.cfg
 )
 
 include_directories(
@@ -23,9 +23,7 @@ include_directories(
   )
 
 
-#add_executable(${PROJECT_NAME} src/CamController.cpp)
-
-add_library(${PROJECT_NAME} src/CamController.cpp)
+add_library(${PROJECT_NAME} src/cam_sync.cpp)
 
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
 
@@ -34,7 +32,7 @@ add_dependencies(${PROJECT_NAME}
   ${catkin_EXPORTED_TARGETS}
   )
 
-add_executable(${PROJECT_NAME}_node src/broadcast_cameras_node.cpp src/CamController.cpp)
+add_executable(${PROJECT_NAME}_node src/cam_sync_node.cpp src/cam_sync.cpp)
 
 # make sure configure headers are built before any node using them
 add_dependencies(${PROJECT_NAME}_node ${PROJECT_NAME}_gencfg)
@@ -44,13 +42,4 @@ target_link_libraries(${PROJECT_NAME}_node
   ${catkin_LIBRARIES}
   )
 
-#
-# build the test node as well
-#
-#add_executable(cam_test_node src/cam_test_node.cpp src/CamController.cpp)
-
-#target_link_libraries(cam_test_node
-#  ${PROJECT_NAME}
-#  ${catkin_LIBRARIES}
-# )
 

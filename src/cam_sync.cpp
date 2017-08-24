@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#include <poll_cameras/CamController.h>
+#include <cam_sync/cam_sync.h>
 #include <math.h>
 
-namespace poll_cameras {
-  CamController::CamController(const ros::NodeHandle& parentNode)
+namespace cam_sync {
+  CamSync::CamSync(const ros::NodeHandle& parentNode)
     : parentNode_(parentNode) {
     configServer_.reset(new dynamic_reconfigure::Server<Config>(parentNode_));
     
@@ -35,14 +35,14 @@ namespace poll_cameras {
     }
 
     // for publishing the currently set exposure values
-    configServer_->setCallback(boost::bind(&CamController::configure, this, _1, _2));
+    configServer_->setCallback(boost::bind(&CamSync::configure, this, _1, _2));
   }
-  CamController::~CamController()
+  CamSync::~CamSync()
   {
     stopPoll();
   }
 
-  void CamController::setFPS(double fps) {
+  void CamSync::setFPS(double fps) {
     std::unique_lock<std::mutex> lock(timeMutex_);
     fps_ = fps;
     maxWait_ = std::chrono::nanoseconds((int64_t)(0.5 * 1e9 / fps_));
@@ -50,25 +50,25 @@ namespace poll_cameras {
   }
 
 
-  void CamController::start() {
+  void CamSync::start() {
     time_  = ros::Time::now();
     double duration(60);  // in seconds
     parentNode_.getParam("rec_length", duration);
 
     timer_ = parentNode_.createTimer(ros::Duration(duration),
-                                     boost::bind(&CamController::timerCallback,
+                                     boost::bind(&CamSync::timerCallback,
                                                  this, _1), /*oneshot*/ true);
     startPoll();
   }
 
-  void CamController::timerCallback(const ros::TimerEvent &event) {
+  void CamSync::timerCallback(const ros::TimerEvent &event) {
     ROS_INFO("timer expired, shutting down!");
     ros::shutdown();
     ROS_INFO("shutdown complete!");
   }
 
   
-  void CamController::configure(Config& config, int level) {
+  void CamSync::configure(Config& config, int level) {
     ROS_INFO("configuring server!");
     if (level < 0) {
       ROS_INFO("%s: %s", parentNode_.getNamespace().c_str(),
@@ -78,7 +78,8 @@ namespace poll_cameras {
 
     CamConfig cc;
     cc.fps              = config.fps;
-    cc.video_mode       = 23; // format7
+    //cc.video_mode       = 23; // format7
+    cc.video_mode       = 0; // format7
     cc.format7_mode     = config.format7_mode;
     cc.width            = config.width;
     cc.height           = config.height;
@@ -104,7 +105,7 @@ namespace poll_cameras {
     configureCams(cc);
   }
 
-  void CamController::configureCams(CamConfig& config) {
+  void CamSync::configureCams(CamConfig& config) {
     if (stopPoll()) {
       // something was running
       configureCameras(config);
@@ -115,7 +116,7 @@ namespace poll_cameras {
     }
   }
 
-  void CamController::frameGrabThread(int camIndex) {
+  void CamSync::frameGrabThread(int camIndex) {
     ROS_INFO("Starting up frame grab thread for camera %d", camIndex);
 
     // Grab a copy of the time, then can release the lock so that 
@@ -143,7 +144,6 @@ namespace poll_cameras {
         } else {
           // slave cameras wait until the master has published
           // a new timestamp.
-#if 1
           while (time_ <= lastTime) {
             // lock will be free while waiting!
             if (timeCV_.wait_for(lock, maxWait_) == std::cv_status::timeout) {
@@ -158,7 +158,6 @@ namespace poll_cameras {
               ret = curCam->GrabNonBlocking(image_msg);
             }
           }
-#endif          
           lastTime = time_;
         }
         image_msg->header.stamp = time_;
@@ -180,7 +179,7 @@ namespace poll_cameras {
     ROS_INFO("frame grabbing thread exited!");
   }
 
-  void CamController::configureCameras(CamConfig& config) {
+  void CamSync::configureCameras(CamConfig& config) {
     if (masterCamIdx_ >= cameras_.size()) {
       ROS_ERROR("INVALID MASTER CAM INDEX: %d for %zu cams!",
                 masterCamIdx_, cameras_.size());
@@ -224,21 +223,21 @@ namespace poll_cameras {
     }
   }
 
-  bool CamController::startPoll() {
+  bool CamSync::startPoll() {
     std::unique_lock<std::mutex> lock(pollMutex_);
     if (frameGrabThreads_.empty()) {
       keepPolling_ = true;
       for (int i = 0; i < numCameras_; ++i) {
         cameras_[i]->camera().StartCapture();
         frameGrabThreads_.push_back(
-          boost::make_shared<boost::thread>(&CamController::frameGrabThread, this, i));
+          boost::make_shared<boost::thread>(&CamSync::frameGrabThread, this, i));
       }
       return (true);
     }
     return (false);
   }
 
-  bool CamController::stopPoll() {
+  bool CamSync::stopPoll() {
     {
       std::unique_lock<std::mutex> lock(pollMutex_);
       keepPolling_ = false;

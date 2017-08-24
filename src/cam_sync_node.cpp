@@ -14,15 +14,13 @@
  * limitations under the License.
  */
 
-#include "poll_cameras/CamController.h"
+#include "cam_sync/cam_sync.h"
 #include <ros/ros.h>
 
 
 
 int main(int argc, char** argv) {
-  ROS_INFO("Initializing Camera Polling Node");
-
-  ros::init(argc, argv, "poll_cameras");
+  ros::init(argc, argv, "cam_sync");
   ros::NodeHandle nh("~");
 
   try {
@@ -33,9 +31,9 @@ int main(int argc, char** argv) {
 
     ROS_INFO("Recording for %f seconds on %d cameras.", rec_length, num_cameras);
  
-    poll_cameras::CamController controller(nh);
-    controller.start(); // this call returns
-    ros::spin(); // because this must be called!
+    cam_sync::CamSync camsync(nh);
+    camsync.start();
+    ros::spin();
   } catch (const std::exception& e) {
     ROS_ERROR("%s: %s", nh.getNamespace().c_str(), e.what());
   }

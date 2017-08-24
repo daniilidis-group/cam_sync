@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef POLLCAMERAS_CAMCONTROLLER_H
-#define POLLCAMERAS_CAMCONTROLLER_H
+#ifndef CAMSYNC_CAMSYNC_H
+#define CAMSYNC_CAMSYNC_H
 
 #include <mutex>
 #include <boost/thread.hpp>
@@ -29,29 +29,29 @@
 #include <dynamic_reconfigure/server.h>
 #include <flea3/Flea3DynConfig.h>
 #include <flea3/flea3_ros.h>
-#include <poll_cameras/PollCamerasDynConfig.h>
+#include "cam_sync/CamSyncDynConfig.h"
 #include <sensor_msgs/Image.h>
 
 namespace flea3 {
   class Flea3Ros;
 }
 
-namespace poll_cameras {
+namespace cam_sync {
 
-class CamController {
+class CamSync {
   
 public:
   using Cam       = flea3::Flea3Ros;
   using CamPtr    = boost::shared_ptr<Cam>;
   using ThreadPtr = boost::shared_ptr<boost::thread>;
   using CamConfig = flea3::Flea3DynConfig;
-  using Config    = PollCamerasDynConfig;
+  using Config    = CamSyncDynConfig;
   using Time = ros::Time;
 
-  CamController(const ros::NodeHandle& parentNode);
-  ~CamController();
-  CamController(const CamController&) = delete;
-  CamController& operator=(const CamController&) = delete;
+  CamSync(const ros::NodeHandle& parentNode);
+  ~CamSync();
+  CamSync(const CamSync&) = delete;
+  CamSync& operator=(const CamSync&) = delete;
 
   void configureCams(CamConfig& config);
   void configure(Config& config, int level);
