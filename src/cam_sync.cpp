@@ -78,8 +78,8 @@ namespace cam_sync {
 
     CamConfig cc;
     cc.fps              = config.fps;
-    //cc.video_mode       = 23; // format7
-    cc.video_mode       = 0; // format7
+    cc.video_mode       = 23; // format7
+    //cc.video_mode       = 0; // format7
     cc.format7_mode     = config.format7_mode;
     cc.width            = config.width;
     cc.height           = config.height;
