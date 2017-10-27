@@ -84,10 +84,10 @@ namespace cam_sync {
     cc.width            = config.width;
     cc.height           = config.height;
     cc.raw_bayer_output = false;
-    cc.trigger_source   = -1; // free running
+    cc.trigger_source   = config.trigger_source;
     cc.pixel_format     = 22; // raw8
     cc.trigger_polarity = 0;
-    cc.strobe_control   = -1;
+    cc.strobe_control   = config.strobe_control;
     cc.strobe_polarity  = 0;
     cc.exposure         = false;
     cc.auto_exposure    = false;
@@ -185,12 +185,16 @@ namespace cam_sync {
                 masterCamIdx_, cameras_.size());
       return;
     }
+    //  save trigger source before overwriting
+    int trigger_source = config.trigger_source;
+
     // first set the master!
     config.fps             = fps_;
-    config.strobe_control  = 2;  // GPIO 2
     config.strobe_polarity = 0;  // low
     config.trigger_source  = -1; // free running
-
+    config.enable_output_voltage = 1; // for blackfly master
+    std::cout << "setting strobe control to: " << config.strobe_control << std::endl;
+    
 #ifdef USE_AUTO_EXP
     config.exposure        = true;
     config.auto_shutter    = true;
@@ -205,8 +209,11 @@ namespace cam_sync {
 
     // Switch on trigger for slave
     config.fps              = fps_ * 1.5;  // max frame rate!
-    config.trigger_polarity = 0;   // low
-    config.trigger_source   = 3;   // GPIO 3 (wired to GPIO 2 of master)
+    config.trigger_source   = trigger_source; // restore
+    std::cout << "setting trigger source to: " << trigger_source << std::endl;
+    config.enable_output_voltage = 0; // not needed for slaves
+
+    config.strobe_control   = -1;  // no strobe control for slave
     config.trigger_mode     = 14;  // overlapped processing
 
     config.exposure         = false;

@@ -7,6 +7,8 @@
   <arg name="width"   default="1024"/>
   <arg name="wb_red"   default="652"/>
   <arg name="wb_blue"  default="589"/>
+  <arg name="strobe_control"  default="2"/>
+  <arg name="trigger_source"  default="3"/>
     
 
   <!-- Camera Configurations -->
@@ -50,6 +52,8 @@
     <param name="height" type="int" value="$(arg height)"/>
     <param name="auto_white_balance" type="bool" value="false"/>
     <param name="white_balance" type="bool" value="true"/>
+    <param name="strobe_control" type="int" value="$(arg strobe_control)"/>
+    <param name="trigger_source" type="int" value="$(arg trigger_source)"/>
     <param name="wb_red" type="int" value="$(arg wb_red)"/>
     <param name="wb_blue" type="int" value="$(arg wb_blue)"/>
     
