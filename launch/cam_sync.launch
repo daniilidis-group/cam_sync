@@ -9,7 +9,7 @@
   <arg name="wb_blue"  default="589"/>
   <arg name="strobe_control"  default="2"/>
   <arg name="trigger_source"  default="3"/>
-    
+  <arg name="gain_db"  default="0"/>
 
   <!-- Camera Configurations -->
   <arg name="cam0" default="17041930"/>
@@ -58,6 +58,6 @@
     <param name="wb_blue" type="int" value="$(arg wb_blue)"/>
     
     <param name="shutter_ms" type="double" value="$(arg shutter_ms)"/>
-    <param name="gain_db" type="double" value="0"/>
+    <param name="gain_db" type="double" value="$(arg gain_db)"/>
   </node>
 </launch>
