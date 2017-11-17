@@ -17,6 +17,9 @@
 #ifndef CAMSYNC_CAMSYNC_H
 #define CAMSYNC_CAMSYNC_H
 
+#include "cam_sync/exposure_controller.h"
+#include "cam_sync/CamSyncDynConfig.h"
+
 #include <mutex>
 #include <boost/thread.hpp>
 #include <condition_variable>
@@ -29,7 +32,6 @@
 #include <dynamic_reconfigure/server.h>
 #include <flea3/Flea3DynConfig.h>
 #include <flea3/flea3_ros.h>
-#include "cam_sync/CamSyncDynConfig.h"
 #include <sensor_msgs/Image.h>
 
 namespace flea3 {
@@ -46,7 +48,7 @@ public:
   using ThreadPtr = boost::shared_ptr<boost::thread>;
   using CamConfig = flea3::Flea3DynConfig;
   using Config    = CamSyncDynConfig;
-  using Time = ros::Time;
+  using Time      = ros::Time;
 
   CamSync(const ros::NodeHandle& parentNode);
   ~CamSync();
@@ -73,7 +75,8 @@ private:
   ros::NodeHandle          parentNode_;
   int                      numCameras_;
   int                      masterCamIdx_{0};
-  
+  Config                   config_;
+
   std::mutex               pollMutex_;
   bool                     keepPolling_{false};
   
@@ -85,6 +88,8 @@ private:
 
   std::vector<CamPtr>      cameras_;
   std::vector<ThreadPtr>   frameGrabThreads_;
+  typedef std::shared_ptr<ExposureController> ControllerPtr;
+  std::vector<ControllerPtr> exposureControllers_;
   std::shared_ptr<dynamic_reconfigure::Server<Config> >    configServer_;
   ros::Timer               timer_;
 

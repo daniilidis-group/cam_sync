@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 generate_dynamic_reconfigure_options(
   cfg/CamSyncDynConfig.cfg
+  cfg/ExposureControlDynConfig.cfg
 )
 
 include_directories(
@@ -23,7 +24,7 @@ include_directories(
   )
 
 
-add_library(${PROJECT_NAME} src/cam_sync.cpp)
+add_library(${PROJECT_NAME} src/cam_sync.cpp src/exposure_controller.cpp)
 
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
 

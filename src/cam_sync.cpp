@@ -14,10 +14,25 @@
  * limitations under the License.
  */
 
-#include <cam_sync/cam_sync.h>
+#include "cam_sync/cam_sync.h"
+#include "cam_sync/exposure_controller.h"
 #include <math.h>
 
 namespace cam_sync {
+  static void setShutter(CamSync::CamPtr cam, double s) {
+    bool auto_shutter(false);
+    double rs(s);
+    cam->camera().SetShutter(auto_shutter, rs);
+    ROS_INFO("set shutter to: %10.4fms, driver returned %8.4fms", s, rs);
+  }
+
+  static void setGain(CamSync::CamPtr cam, double g) {
+    bool auto_gain(false);
+    double rg(g);
+    cam->camera().SetGain(auto_gain, rg);
+    ROS_INFO("set gain to:    %10.4fdb, driver returned %8.4fdb", g, rg);
+  }
+  
   CamSync::CamSync(const ros::NodeHandle& parentNode)
     : parentNode_(parentNode) {
     configServer_.reset(new dynamic_reconfigure::Server<Config>(parentNode_));
@@ -29,12 +44,12 @@ namespace cam_sync {
     setFPS(fps);
 
     for (int i = 0; i < numCameras_; i++) {
-      CamPtr cam_tmp = 
-        boost::make_shared<Cam>(parentNode_, "cam" + std::to_string(i));
+      std::string camName = "cam" + std::to_string(i);
+      CamPtr cam_tmp = boost::make_shared<Cam>(parentNode_, camName);
       cameras_.push_back(move(cam_tmp));
+      exposureControllers_.push_back(ControllerPtr(new ExposureController(camName)));
     }
 
-    // for publishing the currently set exposure values
     configServer_->setCallback(boost::bind(&CamSync::configure, this, _1, _2));
   }
   CamSync::~CamSync()
@@ -74,6 +89,7 @@ namespace cam_sync {
       ROS_INFO("%s: %s", parentNode_.getNamespace().c_str(),
                "Initializing reconfigure server");
     }
+    config_ = config;
     setFPS(config.fps);
 
     CamConfig cc;
@@ -91,7 +107,6 @@ namespace cam_sync {
     cc.strobe_polarity  = 0;
     cc.exposure         = false;
     cc.auto_exposure    = false;
-    cc.exposure_value   = config.exposure_value;
     cc.auto_shutter     = false;
     cc.shutter_ms       = config.shutter_ms;
     cc.auto_gain        = false;
@@ -156,6 +171,7 @@ namespace cam_sync {
               // for us, and grab that one.
               timedOut = true;
               ret = curCam->GrabNonBlocking(image_msg);
+              ROS_WARN_STREAM("timeout on frame for camera " << camIndex);
             }
           }
           lastTime = time_;
@@ -164,6 +180,15 @@ namespace cam_sync {
       }
       if (ret) {
         curCam->Publish(image_msg);
+        double newShutter(-1.0), newGain(-1.0);
+        exposureControllers_[camIndex]->imageCallback(image_msg, &newShutter, &newGain);
+        if (newShutter != -1.0) {
+          setShutter(curCam, newShutter);
+        }
+        if (newGain != -1.0) {
+          setGain(curCam, newGain);
+        }
+
       } else {
         if (!timedOut) {
           ROS_ERROR("There was a problem grabbing a frame from cam%d", camIndex);
@@ -193,40 +218,38 @@ namespace cam_sync {
     config.strobe_polarity = 0;  // low
     config.trigger_source  = -1; // free running
     config.enable_output_voltage = 1; // for blackfly master
-    std::cout << "setting strobe control to: " << config.strobe_control << std::endl;
     
-#ifdef USE_AUTO_EXP
-    config.exposure        = true;
-    config.auto_shutter    = true;
-    config.auto_gain       = true;
-#endif
+    config.exposure        = false;
+    config.auto_shutter    = false;
+    config.auto_gain       = false;
 
     CamConfig cc(config);
     cameras_[masterCamIdx_]->Stop();
     cameras_[masterCamIdx_]->camera().Configure(cc);
+    exposureControllers_[masterCamIdx_]->setFPS(config_.fps, config_.max_free_fps);
+    exposureControllers_[masterCamIdx_]->setCurrentShutter(cc.shutter_ms);
+    exposureControllers_[masterCamIdx_]->setCurrentGain(cc.gain_db);
     cameras_[masterCamIdx_]->Start();
     
-
     // Switch on trigger for slave
     config.fps              = fps_ * 1.5;  // max frame rate!
     config.trigger_source   = trigger_source; // restore
-    std::cout << "setting trigger source to: " << trigger_source << std::endl;
     config.enable_output_voltage = 0; // not needed for slaves
 
     config.strobe_control   = -1;  // no strobe control for slave
     config.trigger_mode     = 14;  // overlapped processing
 
-    config.exposure         = false;
-    config.auto_shutter     = false;
-    config.auto_gain        = false;
-    
-    for (int i=0; i<numCameras_; ++i) {
-      if (i == masterCamIdx_) continue;
-      CamConfig cc2(config);
-      CamPtr curCam = cameras_[i];
-      curCam->Stop();
-      curCam->camera().Configure(cc2);
-      curCam->Start();
+    for (int i = 0; i < numCameras_; ++i) {
+      if (i != masterCamIdx_) {
+        CamConfig cc2(config);
+        CamPtr curCam = cameras_[i];
+        curCam->Stop();
+        curCam->camera().Configure(cc2);
+        exposureControllers_[i]->setFPS(config_.fps, config_.max_free_fps);
+        exposureControllers_[i]->setCurrentShutter(cc.shutter_ms);
+        exposureControllers_[i]->setCurrentGain(cc.gain_db);
+        curCam->Start();
+      }
     }
   }
 
