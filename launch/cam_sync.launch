@@ -60,6 +60,17 @@
     <param name="cam1/exposure_control/top_margin" type="int" value= "0"/>
     <param name="cam2/exposure_control/top_margin" type="int" value=" 0"/>
     <param name="cam3/exposure_control/top_margin" type="int" value=" 0"/>
+
+    <param name="cam0/exposure_control/max_free_fps" type="double" value="41"/>
+    <param name="cam1/exposure_control/max_free_fps" type="double" value="41"/>
+    <param name="cam2/exposure_control/max_free_fps" type="double" value="41"/>
+    <param name="cam3/exposure_control/max_free_fps" type="double" value="41"/>
+
+    <param name="cam0/exposure_control/max_shutter" type="double" value="3.5"/>
+    <param name="cam1/exposure_control/max_shutter" type="double" value="3.5"/>
+    <param name="cam2/exposure_control/max_shutter" type="double" value="3.5"/>
+    <param name="cam3/exposure_control/max_shutter" type="double" value="3.5"/>
+    
     
     <param name="rec_length" type="double" value="$(arg duration)"/>
     <param name="num_cameras" type="int" value="$(arg num_cameras)"/>

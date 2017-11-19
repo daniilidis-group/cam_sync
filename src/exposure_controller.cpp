@@ -176,6 +176,5 @@ namespace cam_sync {
 
   void ExposureController::configure(ExposureControlDynConfig& config, int level) {
     config_ = config;
-    ROS_INFO_STREAM("autoexp: " << config_.enabled);
   }
 }
