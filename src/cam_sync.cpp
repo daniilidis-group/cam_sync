@@ -23,14 +23,14 @@ namespace cam_sync {
     bool auto_shutter(false);
     double rs(s);
     cam->camera().SetShutter(auto_shutter, rs);
-    ROS_INFO("set shutter to: %10.4fms, driver returned %8.4fms", s, rs);
+    //ROS_INFO("set shutter to: %10.4fms, driver returned %8.4fms", s, rs);
   }
 
   static void setGain(CamSync::CamPtr cam, double g) {
     bool auto_gain(false);
     double rg(g);
     cam->camera().SetGain(auto_gain, rg);
-    ROS_INFO("set gain to:    %10.4fdb, driver returned %8.4fdb", g, rg);
+    // ROS_INFO("set gain to:    %10.4fdb, driver returned %8.4fdb", g, rg);
   }
   
   CamSync::CamSync(const ros::NodeHandle& parentNode)
@@ -47,9 +47,8 @@ namespace cam_sync {
       std::string camName = "cam" + std::to_string(i);
       CamPtr cam_tmp = boost::make_shared<Cam>(parentNode_, camName);
       cameras_.push_back(move(cam_tmp));
-      exposureControllers_.push_back(ControllerPtr(new ExposureController(camName)));
+      exposureControllers_.push_back(ControllerPtr(new ExposureController(parentNode_, camName)));
     }
-
     configServer_->setCallback(boost::bind(&CamSync::configure, this, _1, _2));
   }
   CamSync::~CamSync()
@@ -188,7 +187,6 @@ namespace cam_sync {
         if (newGain != -1.0) {
           setGain(curCam, newGain);
         }
-
       } else {
         if (!timedOut) {
           ROS_ERROR("There was a problem grabbing a frame from cam%d", camIndex);

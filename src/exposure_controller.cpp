@@ -16,11 +16,13 @@
 
 #include "cam_sync/exposure_controller.h"
 
-#define DEBUG
+//#define DEBUG
 
 namespace cam_sync {
-  ExposureController::ExposureController(const std::string &camName) {
-    nh_ = ros::NodeHandle("~/" + camName + "/exposure_control");
+  ExposureController::ExposureController(const ros::NodeHandle &parentNode,
+                                         const std::string &camName) {
+    nh_ = ros::NodeHandle(parentNode, camName + "/exposure_control");
+    name_ = camName;
     configServer_.reset(new dynamic_reconfigure::Server<ExposureControlDynConfig>(nh_));
     configServer_->setCallback(boost::bind(&ExposureController::configure, this, _1, _2));
   }
@@ -34,28 +36,20 @@ namespace cam_sync {
     return (std::max(std::min(desiredGain, config_.max_gain), config_.min_gain));
   }
 
-  void ExposureController::imageCallback(const sensor_msgs::ImageConstPtr &img,
-                                         double *newShutter, double *newGain) {
-    if (!config_.enabled || currentShutter_ < 0 || currentGain_ < 0) {
-      *newShutter = -1;
-      *newGain = -1;
-    }
-    
+  bool ExposureController::updateExposure(double b, double *newShutter, double *newGain) {
+    double err_b = (config_.brightness - b);
+    bool hasChanged(false);
+#ifdef DEBUG
+    ROS_INFO("b: %6.3f err_b: %5.2f curr shut: %5.2f curr gain: %5.3f wait: %1d",
+             b, err_b, currentShutter_, currentGain_, numFramesSkip_);
+#endif
     if (numFramesSkip_ > 0) {
       // Changes in gain or shutter take a few
       // frames to arrive at the camera, so we just skip
       // those.
       numFramesSkip_--;
-      return;
+      return (hasChanged);
     }
-    double b = std::max(getAverageBrightness(&img->data[0], img->height,
-                                             img->width, img->step), 1.0);
-    double err_b = (config_.brightness - b);
-
-#ifdef DEBUG
-    ROS_INFO("b: %6.3f err_b: %7.4f curr shut: %7.5f curr gain: %7.5f",
-             b, err_b, currentShutter_, currentGain_);
-#endif
 
     if (fabs(err_b) > config_.brightness_tol) {
       double brightRatio  = std::max(std::min(config_.brightness/b, 10.0), 0.1);
@@ -100,14 +94,30 @@ namespace cam_sync {
             *newShutter = currentShutter_;
             *newGain = -1.0;
 #ifdef DEBUG
-            ROS_INFO_STREAM("updating shutter to: " << currentShutter_);
+            //ROS_INFO_STREAM("updating shutter to: " << currentShutter_);
 #endif
           }
         }
       }
     }
-    if (*newGain != -1 || *newGain != -1) {
+    hasChanged = *newGain != -1 || *newShutter != -1;
+    if (hasChanged) {
       numFramesSkip_ = config_.wait_frames;
+    }
+    return (hasChanged);
+  }
+
+  void ExposureController::imageCallback(const sensor_msgs::ImageConstPtr &img,
+                                         double *newShutter, double *newGain) {
+    *newShutter = -1;
+    *newGain = -1;
+    if (config_.enabled && currentShutter_ >= 0 && currentGain_ >= 0) {
+      double b = std::max(getAverageBrightness(&img->data[0], img->height,
+                                               img->width, img->step), 1.0);
+      if (updateExposure(b, newShutter, newGain)) {
+         ROS_INFO("%s  brightness: %7.2f new shut: %5.2f new gain: %5.3f",
+                   name_.c_str(), b, currentShutter_, currentGain_);
+      }
     }
   }
 
@@ -165,7 +175,7 @@ namespace cam_sync {
   }
 
   void ExposureController::configure(ExposureControlDynConfig& config, int level) {
-    ROS_INFO_STREAM("reconfiguring " << nh_.getNamespace());
     config_ = config;
+    ROS_INFO_STREAM("autoexp: " << config_.enabled);
   }
 }

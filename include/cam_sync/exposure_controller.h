@@ -26,7 +26,7 @@
 namespace cam_sync {
   class ExposureController {
   public:
-    ExposureController(const std::string &camName);
+    ExposureController(const ros::NodeHandle &pn, const std::string &camName);
     ~ExposureController();
     ExposureController(const ExposureController&) = delete;
     ExposureController& operator=(const ExposureController&) = delete;
@@ -42,8 +42,10 @@ namespace cam_sync {
     double  calculateGain(double brightRatio) const;
     double  getAverageBrightness(const unsigned char *data,
                                  int rows, int cols, int stride);
+    bool    updateExposure(double b, double *newShutter, double *newGain);
     // ----------- variables
     ros::NodeHandle           nh_;
+    std::string               name_;
     ExposureControlDynConfig  config_;
     double                    fps_{15.0};
     int                       numFramesSkip_{0};   // num frames to skip

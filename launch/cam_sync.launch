@@ -10,6 +10,9 @@
   <arg name="strobe_control"  default="2"/>
   <arg name="trigger_source"  default="3"/>
   <arg name="gain_db"  default="0"/>
+  <arg name="autoexp_enabled"  default="false"/>
+  <arg name="brightness"  default="120.0"/>
+  <arg name="brightness_tol"  default="10.0"/>
 
   <!-- Camera Configurations -->
   <arg name="cam0" default="17041930"/>
@@ -38,6 +41,26 @@
     <param name="cam2/calib_url" type="string" value="$(arg calib_dir)/$(arg cam2).yaml"/>
     <param name="cam3/calib_url" type="string" value="$(arg calib_dir)/$(arg cam3).yaml"/>
 
+    <param name="cam0/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
+    <param name="cam1/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
+    <param name="cam2/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
+    <param name="cam3/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
+    
+    <param name="cam0/exposure_control/brightness" type="double" value="$(arg brightness)"/>
+    <param name="cam1/exposure_control/brightness" type="double" value="$(arg brightness)"/>
+    <param name="cam2/exposure_control/brightness" type="double" value="$(arg brightness)"/>
+    <param name="cam3/exposure_control/brightness" type="double" value="$(arg brightness)"/>
+
+    <param name="cam0/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
+    <param name="cam1/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
+    <param name="cam2/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
+    <param name="cam3/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
+
+    <param name="cam0/exposure_control/top_margin" type="int" value="70"/>
+    <param name="cam1/exposure_control/top_margin" type="int" value= "0"/>
+    <param name="cam2/exposure_control/top_margin" type="int" value=" 0"/>
+    <param name="cam3/exposure_control/top_margin" type="int" value=" 0"/>
+    
     <param name="rec_length" type="double" value="$(arg duration)"/>
     <param name="num_cameras" type="int" value="$(arg num_cameras)"/>
     <param name="fps" type="double" value="$(arg fps)"/>
