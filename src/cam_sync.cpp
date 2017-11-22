@@ -45,10 +45,17 @@ namespace cam_sync {
     rotated->data.resize(rotated->step * rotated->height);
 
     // need to skip a column to get the bayer pattern into the right shape!
-    int skip_cols = 1;
-    for (int row = 0; row < msg->height; row++) {
-      for (int col = skip_cols; col < msg->width; col++) {
-        rotated->data[(col - skip_cols) * rotated->step + row] = msg->data[row * msg->step + (msg->width - col - 1)];
+    const int skip_cols = 1;
+    const int line_size = msg->step;
+    const int orig_width = msg->width;
+    const int rotated_step = rotated->step;
+    const int msg_height = msg->height;
+
+    for (int row = 0; row < msg_height; row++) {
+      const int row_offset = row * line_size + orig_width - 1;
+      const int targ_offset = row - skip_cols * rotated_step;
+      for (int col = skip_cols; col < orig_width - 1; col++) {
+        rotated->data[col * rotated_step + targ_offset] = msg->data[row_offset - col];
       }
     }
     for (int row = 0; row < msg->height; row++) {
