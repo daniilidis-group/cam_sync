@@ -74,6 +74,7 @@ private:
   // Variables for the camera state
   ros::NodeHandle          parentNode_;
   int                      numCameras_;
+  bool                     rotateImage_{false};
   int                      masterCamIdx_{0};
   Config                   config_;
 

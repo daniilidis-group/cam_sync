@@ -32,12 +32,45 @@ namespace cam_sync {
     cam->camera().SetGain(auto_gain, rg);
     // ROS_INFO("set gain to:    %10.4fdb, driver returned %8.4fdb", g, rg);
   }
-  
+
+  static boost::shared_ptr<sensor_msgs::Image> 
+  rotate_image(const boost::shared_ptr<sensor_msgs::Image> &msg) {
+    boost::shared_ptr<sensor_msgs::Image> rotated(new sensor_msgs::Image());
+    rotated->header = msg->header;
+    rotated->width  = msg->height;
+    rotated->height = msg->width;
+    rotated->step   = rotated->width;
+    rotated->encoding = msg->encoding;
+    rotated->is_bigendian = msg->is_bigendian;
+    rotated->data.resize(rotated->step * rotated->height);
+
+    // need to skip a column to get the bayer pattern into the right shape!
+    const int skip_cols = 1;
+    const int line_size = msg->step;
+    const int orig_width = msg->width;
+    const int rotated_step = rotated->step;
+    const int msg_height = msg->height;
+
+    for (int row = 0; row < msg_height; row++) {
+      const int row_offset = row * line_size + orig_width - 1;
+      const int targ_offset = row - skip_cols * rotated_step;
+      for (int col = skip_cols; col < orig_width - 1; col++) {
+        rotated->data[col * rotated_step + targ_offset] = msg->data[row_offset - col];
+      }
+    }
+    for (int row = 0; row < msg->height; row++) {
+      const int col = 0;
+      rotated->data[col * rotated->step + row] = msg->data[row * msg->step + (msg->width - col - 1)];
+    }
+    return (rotated);
+  }
+
   CamSync::CamSync(const ros::NodeHandle& parentNode)
     : parentNode_(parentNode) {
     configServer_.reset(new dynamic_reconfigure::Server<Config>(parentNode_));
     
     parentNode.getParam("num_cameras", numCameras_);
+    parentNode.param<bool>("rotate_image", rotateImage_, false);
 
     double fps;
     parentNode.getParam("fps", fps);
@@ -178,7 +211,11 @@ namespace cam_sync {
         image_msg->header.stamp = time_;
       }
       if (ret) {
-        curCam->Publish(image_msg);
+        if (rotateImage_) {
+          curCam->Publish(rotate_image(image_msg));
+        } else {
+          curCam->Publish(image_msg);
+        }
         double newShutter(-1.0), newGain(-1.0);
         exposureControllers_[camIndex]->imageCallback(image_msg, &newShutter, &newGain);
         if (newShutter != -1.0) {

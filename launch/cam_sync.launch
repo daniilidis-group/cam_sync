@@ -16,6 +16,7 @@
   <arg name="brightness_cam2"  default="120.0"/>
   <arg name="brightness_cam3"  default="120.0"/>
   <arg name="brightness_tol"  default="10.0"/>
+  <arg name="rotate_image"  default="false"/>
 
   <!-- Camera Configurations -->
   <arg name="cam0" default="17041930"/>
@@ -28,7 +29,10 @@
   <arg name="calib_dir" default="NO_CALIB_DIR_PROVIDED" />
 
   <!-- Broadcast camera image for specified amount of time. -->
-  <node pkg="cam_sync" type="cam_sync_node" name="cam_sync" required="true" output="$(arg output)">
+  <node pkg="cam_sync" type="cam_sync_node" name="cam_sync"
+	required="true" output="$(arg output)">
+    <param name="rotate_image" type="bool" value="$(arg rotate_image)"/>
+
     <param name="cam0/identifier" type="string" value="$(arg cam0)"/>
     <param name="cam1/identifier" type="string" value="$(arg cam1)"/>
     <param name="cam2/identifier" type="string" value="$(arg cam2)"/>
