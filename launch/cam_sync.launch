@@ -11,7 +11,10 @@
   <arg name="trigger_source"  default="3"/>
   <arg name="gain_db"  default="0"/>
   <arg name="autoexp_enabled"  default="false"/>
-  <arg name="brightness"  default="120.0"/>
+  <arg name="brightness_cam0"  default="120.0"/>
+  <arg name="brightness_cam1"  default="120.0"/>
+  <arg name="brightness_cam2"  default="120.0"/>
+  <arg name="brightness_cam3"  default="120.0"/>
   <arg name="brightness_tol"  default="10.0"/>
 
   <!-- Camera Configurations -->
@@ -46,10 +49,10 @@
     <param name="cam2/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
     <param name="cam3/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
     
-    <param name="cam0/exposure_control/brightness" type="double" value="$(arg brightness)"/>
-    <param name="cam1/exposure_control/brightness" type="double" value="$(arg brightness)"/>
-    <param name="cam2/exposure_control/brightness" type="double" value="$(arg brightness)"/>
-    <param name="cam3/exposure_control/brightness" type="double" value="$(arg brightness)"/>
+    <param name="cam0/exposure_control/brightness" type="double" value="$(arg brightness_cam0)"/>
+    <param name="cam1/exposure_control/brightness" type="double" value="$(arg brightness_cam1)"/>
+    <param name="cam2/exposure_control/brightness" type="double" value="$(arg brightness_cam2)"/>
+    <param name="cam3/exposure_control/brightness" type="double" value="$(arg brightness_cam3)"/>
 
     <param name="cam0/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
     <param name="cam1/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
