@@ -70,21 +70,34 @@ private:
   void triggerThread();
   void frameGrabThread(int camIndex);
   void setFPS(double fps);
+  void printStats();
 
+  struct Stat {
+    Stat(double dt = 0, unsigned long int c = 0ul) : sum(dt), cnt(c) {}
+    void addDelay(double dt) { sum += dt; cnt++; }
+    double getAverage() const { return (cnt > 0? sum/cnt :0); }
+    void reset() { sum = 0; cnt = 0; }
+    double sum;
+    unsigned long int cnt;
+  };
+  
   // Variables for the camera state
   ros::NodeHandle          parentNode_;
   int                      numCameras_;
   bool                     rotateImage_{false};
   int                      masterCamIdx_{0};
   Config                   config_;
+  std::vector<Stat>        cameraStats_;
 
   std::mutex               pollMutex_;
   bool                     keepPolling_{false};
   
   std::mutex               timeMutex_;
   std::condition_variable  timeCV_;
+  ros::Time                t0_;
   ros::Time                time_;
   double                   fps_{15.0};
+  ros::Duration            printInterval_{2.0};
   std::chrono::nanoseconds maxWait_;
 
   std::vector<CamPtr>      cameras_;

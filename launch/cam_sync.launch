@@ -9,13 +9,21 @@
   <arg name="wb_blue"  default="589"/>
   <arg name="strobe_control"  default="2"/>
   <arg name="trigger_source"  default="3"/>
+  <arg name="master_camera_index"  default="0"/>
   <arg name="gain_db"  default="0"/>
+  
   <arg name="autoexp_enabled"  default="false"/>
+  <arg name="exposure_control_file"  default="INVALID_FILE.yaml"/>
+  <arg name="brightness_tol"  default="10.0"/>
   <arg name="brightness_cam0"  default="120.0"/>
   <arg name="brightness_cam1"  default="120.0"/>
   <arg name="brightness_cam2"  default="120.0"/>
   <arg name="brightness_cam3"  default="120.0"/>
-  <arg name="brightness_tol"  default="10.0"/>
+  <arg name="brightness_cam4"  default="120.0"/>
+  <arg name="brightness_cam5"  default="120.0"/>
+  <arg name="brightness_cam6"  default="120.0"/>
+  <arg name="brightness_cam7"  default="120.0"/>
+  
   <arg name="rotate_image"  default="false"/>
 
   <!-- Camera Configurations -->
@@ -23,6 +31,10 @@
   <arg name="cam1" default="17041931"/>
   <arg name="cam2" default="17041932"/>
   <arg name="cam3" default="17041925"/>
+  <arg name="cam4" default="17041940"/>
+  <arg name="cam5" default="17041941"/>
+  <arg name="cam6" default="17041942"/>
+  <arg name="cam7" default="17041943"/>
 
   <arg name="duration" default="30000" /> <!-- after this time the sync will exit! -->
   <arg name="num_cameras" default="4" />
@@ -31,53 +43,36 @@
   <!-- Broadcast camera image for specified amount of time. -->
   <node pkg="cam_sync" type="cam_sync_node" name="cam_sync"
 	required="true" output="$(arg output)">
+    <rosparam command="load" file="$(find bird_recording)/$(arg exposure_control_file)" if="$(arg autoexp_enabled)"/>
     <param name="rotate_image" type="bool" value="$(arg rotate_image)"/>
-
+    <param name="master_camera_index" type="int"  value="$(arg master_camera_index)"/>
     <param name="cam0/identifier" type="string" value="$(arg cam0)"/>
     <param name="cam1/identifier" type="string" value="$(arg cam1)"/>
     <param name="cam2/identifier" type="string" value="$(arg cam2)"/>
     <param name="cam3/identifier" type="string" value="$(arg cam3)"/>
+    <param name="cam4/identifier" type="string" value="$(arg cam4)"/>
+    <param name="cam5/identifier" type="string" value="$(arg cam5)"/>
+    <param name="cam6/identifier" type="string" value="$(arg cam6)"/>
+    <param name="cam7/identifier" type="string" value="$(arg cam7)"/>
 
     <param name="cam0/camera_name" type="string" value="pg_$(arg cam0)"/>
     <param name="cam1/camera_name" type="string" value="pg_$(arg cam1)"/>
     <param name="cam2/camera_name" type="string" value="pg_$(arg cam2)"/>
     <param name="cam3/camera_name" type="string" value="pg_$(arg cam3)"/>
+    <param name="cam4/camera_name" type="string" value="pg_$(arg cam4)"/>
+    <param name="cam5/camera_name" type="string" value="pg_$(arg cam5)"/>
+    <param name="cam6/camera_name" type="string" value="pg_$(arg cam6)"/>
+    <param name="cam7/camera_name" type="string" value="pg_$(arg cam7)"/>
 
     <param name="cam0/calib_url" type="string" value="$(arg calib_dir)/$(arg cam0).yaml"/>
     <param name="cam1/calib_url" type="string" value="$(arg calib_dir)/$(arg cam1).yaml"/>
     <param name="cam2/calib_url" type="string" value="$(arg calib_dir)/$(arg cam2).yaml"/>
     <param name="cam3/calib_url" type="string" value="$(arg calib_dir)/$(arg cam3).yaml"/>
+    <param name="cam4/calib_url" type="string" value="$(arg calib_dir)/$(arg cam4).yaml"/>
+    <param name="cam5/calib_url" type="string" value="$(arg calib_dir)/$(arg cam5).yaml"/>
+    <param name="cam6/calib_url" type="string" value="$(arg calib_dir)/$(arg cam6).yaml"/>
+    <param name="cam7/calib_url" type="string" value="$(arg calib_dir)/$(arg cam7).yaml"/>
 
-    <param name="cam0/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
-    <param name="cam1/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
-    <param name="cam2/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
-    <param name="cam3/exposure_control/enabled" type="bool" value="$(arg autoexp_enabled)"/>
-    
-    <param name="cam0/exposure_control/brightness" type="double" value="$(arg brightness_cam0)"/>
-    <param name="cam1/exposure_control/brightness" type="double" value="$(arg brightness_cam1)"/>
-    <param name="cam2/exposure_control/brightness" type="double" value="$(arg brightness_cam2)"/>
-    <param name="cam3/exposure_control/brightness" type="double" value="$(arg brightness_cam3)"/>
-
-    <param name="cam0/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
-    <param name="cam1/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
-    <param name="cam2/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
-    <param name="cam3/exposure_control/brightness_tol" type="double" value="$(arg brightness_tol)"/>
-
-    <param name="cam0/exposure_control/top_margin" type="int" value="70"/>
-    <param name="cam1/exposure_control/top_margin" type="int" value= "0"/>
-    <param name="cam2/exposure_control/top_margin" type="int" value=" 0"/>
-    <param name="cam3/exposure_control/top_margin" type="int" value=" 0"/>
-
-    <param name="cam0/exposure_control/max_free_fps" type="double" value="41"/>
-    <param name="cam1/exposure_control/max_free_fps" type="double" value="41"/>
-    <param name="cam2/exposure_control/max_free_fps" type="double" value="41"/>
-    <param name="cam3/exposure_control/max_free_fps" type="double" value="41"/>
-
-    <param name="cam0/exposure_control/max_shutter" type="double" value="3.5"/>
-    <param name="cam1/exposure_control/max_shutter" type="double" value="3.5"/>
-    <param name="cam2/exposure_control/max_shutter" type="double" value="3.5"/>
-    <param name="cam3/exposure_control/max_shutter" type="double" value="3.5"/>
-    
     
     <param name="rec_length" type="double" value="$(arg duration)"/>
     <param name="num_cameras" type="int" value="$(arg num_cameras)"/>
