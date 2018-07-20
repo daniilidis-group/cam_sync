@@ -278,14 +278,11 @@ namespace cam_sync {
           return; // we are done here!
         }
       } else {
-        if (arrivalTimes_.size() >= cameras_.size()) {
+        while (arrivalTimes_.size() >= cameras_.size()) {
           // a frame from each camera has arrived (or multiple from the same
-          // one in case of camera frame drops, but that should be rare)
-          double frameTime = (arrivalTimes_.front() - arrivalTimes_.back()).toSec();
+          double frameTime = (arrivalTimes_.front() - arrivalTimes_[cameras_.size()-1]).toSec();
           arrivalTimes_.pop_back(); // remove oldest time
-          tsFile << arrivalTimes_.front() - t0 << " " << frameTime << std::endl;
           if (frameTime < currentMinFrameTime_) {
-            std::cout << arrivalTimes_.size() << " frame time: " << frameTime << " is less than min: " << currentMinFrameTime_ << std::endl;
             currentMinFrameTime_ = frameTime;
           }
           // every so many full frames, compound the minimum time into
@@ -299,6 +296,7 @@ namespace cam_sync {
             minFrameTimeCounter_ = 0;
             currentMinFrameTime_ = 1e30; // reset minimum
           }
+          tsFile << arrivalTimes_.front() - t0 << " " << frameTime << " " << avgMinFrameTime_ << std::endl;
         }
         // if all cameras have frames, publish!
         int num_valid(0);
@@ -333,7 +331,7 @@ namespace cam_sync {
         std::unique_lock<std::mutex> lock(timeMutex_);
         ros::Time t_grab_end = ros::Time::now();
         arrivalTimes_.push_front(t_grab_end);
-        // XXX cameraFrames_[camIndex].update(ret, t_grab_start, t_grab_end, image_msg);
+        cameraFrames_[camIndex].update(ret, t_grab_start, t_grab_end, image_msg);
 
         // notify the timing thread of arrival
         timeCV_.notify_all();
