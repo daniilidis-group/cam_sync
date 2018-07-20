@@ -1,5 +1,5 @@
-/*
- * 2016 Bernd Pfrommer
+/* -*-c++-*--------------------------------------------------------------------                                                                                                                                    
+ * 2018 Bernd Pfrommer bernd.pfrommer@gmail.com                                                                                                                                                                    
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,14 @@
 #include "cam_sync/cam_sync.h"
 #include "cam_sync/exposure_controller.h"
 #include <math.h>
+#include <fstream>
+#include <boost/range/irange.hpp>
 
 namespace cam_sync {
+  using boost::irange;
+
   static void setShutter(CamSync::CamPtr cam, double s) {
+    if (s == -1.0) return;
     bool auto_shutter(false);
     double rs(s);
     cam->camera().SetShutter(auto_shutter, rs);
@@ -27,15 +32,16 @@ namespace cam_sync {
   }
 
   static void setGain(CamSync::CamPtr cam, double g) {
+    if (g == -1.0) return;
     bool auto_gain(false);
     double rg(g);
     cam->camera().SetGain(auto_gain, rg);
     // ROS_INFO("set gain to:    %10.4fdb, driver returned %8.4fdb", g, rg);
   }
 
-  static boost::shared_ptr<sensor_msgs::Image> 
-  rotate_image(const boost::shared_ptr<sensor_msgs::Image> &msg) {
-    boost::shared_ptr<sensor_msgs::Image> rotated(new sensor_msgs::Image());
+  static CamSync::ImagePtr
+  rotate_image(const CamSync::ImagePtr &msg) {
+    CamSync::ImagePtr rotated(new sensor_msgs::Image());
     rotated->header = msg->header;
     rotated->width  = msg->height;
     rotated->height = msg->width;
@@ -65,6 +71,47 @@ namespace cam_sync {
     return (rotated);
   }
 
+  CamSync::Cam::Cam(const ros::NodeHandle& pnh,
+                    int i,
+                    const std::string& prefix) : Flea3Ros(pnh, prefix), id(i) {
+  }
+
+  void CamSync::CameraFrame::update(bool ret,
+                                   const ros::Time &ts, const ros::Time &te,
+                                   const ImagePtr &img_msg) {
+    std::unique_lock<std::mutex> lock(mutex);
+    timeGrabStart = ts;
+    timeGrabEnd   = te;
+    msg           = img_msg;
+    isValid       = ret;
+  }
+
+  void
+  CamSync::CameraFrame::release(const ros::Time &relT,
+                                const ros::Time &tstamp) {
+    std::unique_lock<std::mutex> lock(mutex);
+    releaseTime = relT;
+    if (isValid) {
+      msg->header.stamp = tstamp;
+      // signal publishing thread to pick up
+    }
+    cv.notify_all();
+  }
+
+  CamSync::ImagePtr
+  CamSync::CameraFrame::waitForNextFrame(bool *keepRunning) {
+    std::unique_lock<std::mutex> lock(mutex);
+    const std::chrono::nanoseconds timeout((int64_t)(1000000000LL));
+    while (ros::ok() && *keepRunning && !isValid) {
+      cv.wait_for(lock, timeout);
+    }
+    if (isValid) {
+      isValid = false; // mark as consumed
+      return (msg);
+    }
+    return (ImagePtr(NULL));
+  }
+
   CamSync::CamSync(const ros::NodeHandle& parentNode)
     : parentNode_(parentNode) {
     configServer_.reset(new dynamic_reconfigure::Server<Config>(parentNode_));
@@ -82,11 +129,12 @@ namespace cam_sync {
 
     for (int i = 0; i < numCameras_; i++) {
       std::string camName = "cam" + std::to_string(i);
-      CamPtr cam_tmp = boost::make_shared<Cam>(parentNode_, camName);
+      CamPtr cam_tmp = boost::make_shared<Cam>(parentNode_, i, camName);
       cameras_.push_back(move(cam_tmp));
       cameraStats_.push_back(Stat(0.0, 0));
       exposureControllers_.push_back(ControllerPtr(new ExposureController(parentNode_, camName)));
     }
+    cameraFrames_.resize(cameras_.size());
     configServer_->setCallback(boost::bind(&CamSync::configure, this, _1, _2));
   }
   CamSync::~CamSync()
@@ -102,6 +150,8 @@ namespace cam_sync {
     double osTimeSlice = 0.020;
     double maxWaitSec = std::max(std::max(0.2 *T, T_max_free), osTimeSlice);
     maxWait_ = std::chrono::nanoseconds((int64_t)(1e9 * maxWaitSec));
+    // make a guess on the average minimum frame time
+    avgMinFrameTime_ = 0.9 * T;
   }
 
 
@@ -194,93 +244,113 @@ namespace cam_sync {
              maxIdx, maxDelay);
   }
 
-  void CamSync::frameGrabThread(int camIndex) {
-    const bool isMaster(camIndex == masterCamIdx_ || (camIndex == 0 && masterCamIdx_ < 0));
-    ROS_INFO("Starting up %s thread for camera %d, max wait is %.6f", isMaster? "MASTER" : "", camIndex, maxWait_.count()/1.0e6);
+  void CamSync::framePublishThread(int camIndex) {
+    ROS_INFO_STREAM("starting publish thread for " << camIndex);
     CamPtr curCam = cameras_[camIndex];
-    Stat   &stat  = cameraStats_[camIndex];
-    // Grab a copy of the time, then can release the lock so that 
-    // trigger can start a new frame if necessary.
-    ros::Time lastTime, lastPrintTime;
-    {
-      std::unique_lock<std::mutex> lock(timeMutex_);
-      lastTime = time_;
+    while (ros::ok() && keepPolling_) {
+      ImagePtr msg = cameraFrames_[camIndex].waitForNextFrame(&keepPolling_);
+      if (!msg) {
+        std::cout << "cam: " << camIndex << " got null frame " << std::endl;
+        continue;
+      }
+      if (rotateImage_) {
+        curCam->Publish(rotate_image(msg));
+      } else {
+        curCam->Publish(msg);
+      }
     }
-    if (isMaster) {
-      t0_ = ros::Time::now();
-    }
+    ROS_INFO_STREAM("frame publish thread done!");
+  }
+
+  void CamSync::timeStampThread() {
+    ROS_INFO("Starting up time sync thread");
+    double maxWaitSec = 1.0;
+    std::ofstream tsFile("/tmp/ts.txt");
+    ros::Time t0 = ros::Time::now();
+    const std::chrono::nanoseconds timeout((int64_t)(1000000000LL));
     while (ros::ok()) {
-      auto image_msg = boost::make_shared<sensor_msgs::Image>();
-      ros::Time t1a = ros::Time::now();
-      bool ret = curCam->Grab(image_msg);
-      bool timedOut(false);
-      ros::Time t1 = ros::Time::now();
-      {  // this section is protected by mutex
-        std::unique_lock<std::mutex> lock(timeMutex_);
-        if (isMaster) {
-          // master camera updates the timestamp for everybody
-          time_ = ros::Time::now();
-          timeCV_.notify_all();
-          if (t1 > lastPrintTime + printInterval_) {
-            printStats();
-            lastPrintTime = t1;
-          }
-        } else {
-          // slave cameras wait until the master has published
-          // a new timestamp.
-          while (time_ <= lastTime) {
-            // lock will be free while waiting!
-            if (timeCV_.wait_for(lock, maxWait_) == std::cv_status::timeout) {
-              // if (false) {
-              // We timed out, what happened? In theory, we should only have to wait
-              // a very short time until the master camera updates the global time stamp.
-              // But wait, maybe there was on old frame in our buffer which we
-              // retrieved when calling Grab(), so we didn't have to wait for the strobe,
-              // grabbed the old frame and are now waiting for the master who is waiting for the
-              // next frame. What to do? Let's see if there is another frame waiting
-              // for us, and grab that one.
-              timedOut = true;
-              ret = curCam->GrabNonBlocking(image_msg);
-              ROS_WARN_STREAM("timeout cam " << camIndex << " max wait: " << maxWait_.count()/1e6  << "ms, regrabbed: " << ret);
-            }
-          }
-          lastTime = time_;
-        }
-        image_msg->header.stamp = time_;
-        //std::unique_lock<std::mutex> lock(timeMutex_);
-        //std::cout << camIndex << " grab start: " << (t1a-t0_).toSec() << " grab return: " << (t1-t0_).toSec() << " got ts: " << (ros::Time::now()-t0_).toSec() << " msg tstamp: " << time_ << std::endl;
-      }
-      if (!isMaster) {
-        ros::Time t2 = ros::Time::now();
-        stat.addDelay((t2-t1).toSec());
-      }
-      if (ret) {
-        if (rotateImage_) {
-          curCam->Publish(rotate_image(image_msg));
-        } else {
-          curCam->Publish(image_msg);
-        }
-        double newShutter(-1.0), newGain(-1.0);
-        exposureControllers_[camIndex]->imageCallback(image_msg, &newShutter, &newGain);
-        if (newShutter != -1.0) {
-          setShutter(curCam, newShutter);
-        }
-        if (newGain != -1.0) {
-          setGain(curCam, newGain);
+      // this section is protected by mutex
+      std::unique_lock<std::mutex> lock(timeMutex_);
+      if (timeCV_.wait_for(lock, timeout) == std::cv_status::timeout) {
+        // we got no frame, check if we should still be running
+        std::unique_lock<std::mutex> lock(pollMutex_);
+        if (!keepPolling_) {
+          return; // we are done here!
         }
       } else {
-        if (!timedOut) {
-          ROS_ERROR("driver could not grab a frame from cam%d", camIndex);
-        } else {
-          ROS_ERROR("Late frame from cam%d", camIndex);
+        if (arrivalTimes_.size() >= cameras_.size()) {
+          // a frame from each camera has arrived (or multiple from the same
+          // one in case of camera frame drops, but that should be rare)
+          double frameTime = (arrivalTimes_.front() - arrivalTimes_.back()).toSec();
+          arrivalTimes_.pop_back(); // remove oldest time
+          tsFile << arrivalTimes_.front() - t0 << " " << frameTime << std::endl;
+          if (frameTime < currentMinFrameTime_) {
+            std::cout << arrivalTimes_.size() << " frame time: " << frameTime << " is less than min: " << currentMinFrameTime_ << std::endl;
+            currentMinFrameTime_ = frameTime;
+          }
+          // every so many full frames, compound the minimum time into
+          // the running average
+          if (++minFrameTimeCounter_ >= cameras_.size() * 10) {
+            const double alpha = 0.1;
+            avgMinFrameTime_ = avgMinFrameTime_ * (1.0-alpha) + currentMinFrameTime_ * alpha;
+            std::cout << "min frame time: " << currentMinFrameTime_ << " avg: " <<
+              avgMinFrameTime_ << " T: " << 1.0 / fps_ << std::endl;
+
+            minFrameTimeCounter_ = 0;
+            currentMinFrameTime_ = 1e30; // reset minimum
+          }
         }
+        // if all cameras have frames, publish!
+        int num_valid(0);
+        for (const auto &f: cameraFrames_) {
+          if (f.isValid) {
+            num_valid++;
+          }
+        }
+        if (num_valid == cameraFrames_.size()) {
+          ros::Time t = ros::Time::now();
+          ros::Time tstamp = t;
+          for (const auto cam_idx: irange(0ul, cameraFrames_.size())) {
+            auto &f = cameraFrames_[cam_idx];
+            f.release(t, tstamp);
+            //tsFile << (f.timeGrabEnd - t0) << " " << cam_idx << " " << (f.timeGrabStart - t0) << " " << (t - t0) << std::endl;
+          }
+        }
+      }
+    }
+  }
+
+  void CamSync::frameGrabThread(int camIndex) {
+    ROS_INFO("Starting upthread for camera %d", camIndex);
+    CamPtr curCam = cameras_[camIndex];
+    while (ros::ok()) {
+      auto image_msg = boost::make_shared<sensor_msgs::Image>();
+      ros::Time t_grab_start = ros::Time::now();
+      bool ret = curCam->Grab(image_msg);
+      // put the new frame in the table
+      {
+        // this section is protected by mutex
+        std::unique_lock<std::mutex> lock(timeMutex_);
+        ros::Time t_grab_end = ros::Time::now();
+        arrivalTimes_.push_front(t_grab_end);
+        // XXX cameraFrames_[camIndex].update(ret, t_grab_start, t_grab_end, image_msg);
+
+        // notify the timing thread of arrival
+        timeCV_.notify_all();
+      }
+      if (ret) {
+        double newShutter(-1.0), newGain(-1.0);
+        exposureControllers_[camIndex]->imageCallback(image_msg, &newShutter, &newGain);
+        setShutter(curCam, newShutter);
+        setGain(curCam, newGain);
+      } else {
+        ROS_WARN_STREAM("grab thread failed for camera " << camIndex);
       }
       {
         std::unique_lock<std::mutex> lock(pollMutex_);
         if (!keepPolling_) break;
       }
     }
-    ROS_INFO("frame grabbing thread exited!");
   }
 
   void CamSync::configureCameras(CamConfig& config) {
@@ -307,7 +377,7 @@ namespace cam_sync {
       exposureControllers_[masterCamIdx_]->setFPS(config_.fps, config_.max_free_fps);
       exposureControllers_[masterCamIdx_]->setCurrentShutter(cc.shutter_ms);
       exposureControllers_[masterCamIdx_]->setCurrentGain(cc.gain_db);
-      cameras_[masterCamIdx_]->Start();
+      cameras_[masterCamIdx_]->Start(NULL, NULL);
     }
     
     // Switch on trigger for slave
@@ -327,7 +397,7 @@ namespace cam_sync {
         exposureControllers_[i]->setFPS(config_.fps, config_.max_free_fps);
         exposureControllers_[i]->setCurrentShutter(cc2.shutter_ms);
         exposureControllers_[i]->setCurrentGain(cc2.gain_db);
-        curCam->Start();
+        curCam->Start(NULL, NULL);
       }
     }
   }
@@ -337,9 +407,15 @@ namespace cam_sync {
     if (frameGrabThreads_.empty()) {
       keepPolling_ = true;
       for (int i = 0; i < numCameras_; ++i) {
-        cameras_[i]->camera().StartCapture();
+        cameras_[i]->camera().StartCapture(NULL, NULL);
         frameGrabThreads_.push_back(
           boost::make_shared<boost::thread>(&CamSync::frameGrabThread, this, i));
+        framePublishThreads_.push_back(
+          boost::make_shared<boost::thread>(&CamSync::framePublishThread, this, i));
+      }
+      if (!timeStampThread_) {
+        timeStampThread_ =
+          boost::make_shared<boost::thread>(&CamSync::timeStampThread, this);
       }
       return (true);
     }
@@ -356,7 +432,15 @@ namespace cam_sync {
       for (auto &th : frameGrabThreads_) {
         th->join();
       }
+      for (auto &th : framePublishThreads_) {
+        th->join();
+      }
       frameGrabThreads_.clear();
+      framePublishThreads_.clear();
+      if (timeStampThread_) {
+        timeStampThread_->join();
+        timeStampThread_.reset();
+      }
       // must stop capture afterwards!
       for (auto &cam : cameras_) {
         cam->camera().StopCapture();

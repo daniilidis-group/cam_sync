@@ -1,5 +1,5 @@
-/*
- * 2016 Bernd Pfrommer
+/* -*-c++-*--------------------------------------------------------------------                                                                                                                                    
+ * 2018 Bernd Pfrommer bernd.pfrommer@gmail.com                                                                                                                                                                    
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@
 #include <flea3/Flea3DynConfig.h>
 #include <flea3/flea3_ros.h>
 #include <sensor_msgs/Image.h>
+#include <deque>
 
 namespace flea3 {
   class Flea3Ros;
@@ -43,9 +44,16 @@ namespace cam_sync {
 class CamSync {
   
 public:
-  using Cam       = flea3::Flea3Ros;
+  class Cam: public flea3::Flea3Ros {
+  public:
+    explicit Cam(const ros::NodeHandle& pnh,
+                 int id,
+                 const std::string& prefix = std::string());
+    int id{0};
+  };
   using CamPtr    = boost::shared_ptr<Cam>;
   using ThreadPtr = boost::shared_ptr<boost::thread>;
+  using ImagePtr  = boost::shared_ptr<sensor_msgs::Image>;
   using CamConfig = flea3::Flea3DynConfig;
   using Config    = CamSyncDynConfig;
   using Time      = ros::Time;
@@ -68,7 +76,9 @@ private:
   // Thread functions are private.
   void pollImages();
   void triggerThread();
+  void timeStampThread();
   void frameGrabThread(int camIndex);
+  void framePublishThread(int camIndex);
   void setFPS(double fps);
   void printStats();
 
@@ -80,6 +90,28 @@ private:
     double sum;
     unsigned long int cnt;
   };
+
+  struct CameraFrame {
+    CameraFrame(bool iv = false, const ros::Time &ts = ros::Time(0), const ros::Time &te = ros::Time(0),
+                const ImagePtr &img_msg = ImagePtr()) :
+      isValid(iv), timeGrabStart(ts), timeGrabEnd(te), msg(img_msg) {
+    }
+    void update(bool ret, const ros::Time &ts, const ros::Time &te,
+                const ImagePtr &img_msg);
+    void release(const ros::Time &releaseTime, const ros::Time &tstamp);
+    ImagePtr waitForNextFrame(bool *keepRunning);
+    // --------------------------------------------
+    bool        isValid{false};
+    ros::Time   releaseTime;
+    ros::Time   timeGrabStart;
+    ros::Time   timeGrabEnd;
+    ImagePtr    msg;
+    std::mutex  mutex;
+    std::condition_variable  cv;
+    bool operator<(const CameraFrame& rhs) const {
+      return (timeGrabEnd < rhs.timeGrabEnd);
+    }
+  };
   
   // Variables for the camera state
   ros::NodeHandle          parentNode_;
@@ -88,6 +120,7 @@ private:
   int                      masterCamIdx_{0};
   Config                   config_;
   std::vector<Stat>        cameraStats_;
+  std::deque<ros::Time>    arrivalTimes_;
 
   std::mutex               pollMutex_;
   bool                     keepPolling_{false};
@@ -101,13 +134,18 @@ private:
   std::chrono::nanoseconds maxWait_;
 
   std::vector<CamPtr>      cameras_;
+  std::deque<CameraFrame>  cameraFrames_;
   std::vector<ThreadPtr>   frameGrabThreads_;
+  std::vector<ThreadPtr>   framePublishThreads_;
+  ThreadPtr                timeStampThread_;
   typedef std::shared_ptr<ExposureController> ControllerPtr;
   std::vector<ControllerPtr> exposureControllers_;
   std::shared_ptr<dynamic_reconfigure::Server<Config> >    configServer_;
   ros::Timer               timer_;
-
-  long index_;
+  double                   currentMinFrameTime_{1e30};
+  double                   avgMinFrameTime_{0};
+  unsigned int             minFrameTimeCounter_{0};
+  long                     index_;
 };
 
 }
