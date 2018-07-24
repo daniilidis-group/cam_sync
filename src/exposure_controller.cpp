@@ -114,9 +114,11 @@ namespace cam_sync {
     if (config_.enabled && currentShutter_ >= 0 && currentGain_ >= 0) {
       double b = std::max(getAverageBrightness(&img->data[0], img->height,
                                                img->width, img->step), 1.0);
+      double oldShutter = currentShutter_;
+      double oldGain    = currentGain_;
       if (updateExposure(b, newShutter, newGain)) {
-         ROS_INFO("%s  brightness: %7.2f new shut: %5.2f new gain: %5.3f",
-                   name_.c_str(), b, currentShutter_, currentGain_);
+         ROS_INFO("%s bright: %7.2f at shut/gain: [%5.2f %5.3f] new: [%5.2f %5.3f]",
+                  name_.c_str(), b, oldShutter, oldGain, currentShutter_, currentGain_);
       }
     }
   }

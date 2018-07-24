@@ -10,6 +10,7 @@
   <arg name="strobe_control"  default="2"/>
   <arg name="trigger_source"  default="3"/>
   <arg name="master_camera_index"  default="0"/>
+  <arg name="debug_timestamps"  default="false"/>
   <arg name="gain_db"  default="0"/>
   
   <arg name="autoexp_enabled"  default="false"/>
@@ -45,6 +46,7 @@
 	required="true" output="$(arg output)">
     <rosparam command="load" file="$(find bird_recording)/$(arg exposure_control_file)" if="$(arg autoexp_enabled)"/>
     <param name="rotate_image" type="bool" value="$(arg rotate_image)"/>
+    <param name="debug_timestamps"  type="bool" value="$(arg debug_timestamps)"/>
     <param name="master_camera_index" type="int"  value="$(arg master_camera_index)"/>
     <param name="cam0/identifier" type="string" value="$(arg cam0)"/>
     <param name="cam1/identifier" type="string" value="$(arg cam1)"/>
