@@ -144,6 +144,7 @@ namespace cam_sync {
     }
     configServer_->setCallback(boost::bind(&CamSync::configure, this, _1, _2));
   }
+
   CamSync::~CamSync()
   {
     stopPoll();
@@ -352,7 +353,7 @@ namespace cam_sync {
 
     // first set the master!
     config.fps             = fps_;
-    if (masterCamIdx_ > 0) {
+    if (masterCamIdx_ >= 0) {
       config.trigger_source  = -1; // free running
       //config.enable_output_voltage = 1; // for blackfly master
       config.exposure        = false;
@@ -442,4 +443,4 @@ namespace cam_sync {
     return (false);
   }
 
-}  // namespace poll_cameras
+}  // namespace cam_sync
