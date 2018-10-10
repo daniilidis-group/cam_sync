@@ -18,6 +18,7 @@
 #define CAMSYNC_EXPOSURE_CONTROLLER_H
 
 #include "cam_sync/ExposureControlDynConfig.h"
+#include "cam_sync/MetaData.h"
 #include <ros/ros.h>
 #include <dynamic_reconfigure/server.h>
 #include <memory>
@@ -38,6 +39,7 @@ namespace cam_sync {
     void setCurrentGain(double gain)  { currentGain_ = gain; }
     void configure(ExposureControlDynConfig &config, int level);
     double  getMaxShutter() const { return std::min(config_.max_shutter, maxShutterLim_);}
+    void publish(const MetaData &md);
   private:
     double  calculateGain(double brightRatio) const;
     double  getAverageBrightness(const unsigned char *data,
@@ -55,6 +57,7 @@ namespace cam_sync {
     double                    maxShutterLim_{100}; // in msec, limit due to frame rate
     int                       firstRow_{-1};
     int                       lastRow_{-1};
+    ros::Publisher            metaDataPub_;
     std::shared_ptr<dynamic_reconfigure::Server<ExposureControlDynConfig> >    configServer_;
   };
 

@@ -69,9 +69,10 @@ public:
                 bool iv = false, const ros::Time &ts = ros::Time(0),
                 const ros::Time &ta = ros::Time(0),
                 double camTS = 0,
+                const FlyCapture2::ImageMetadata &md = FlyCapture2::ImageMetadata(),
                 const ImagePtr &img_msg = ImagePtr()) :
       cameraId(camId), isValid(iv), timeGrabStart(ts), arrivalTime(ta),
-      cameraTimeStamp(camTS), msg(img_msg) {
+      cameraTimeStamp(camTS), metaData(md), msg(img_msg) {
       arrivalTime = ros::Time::now();
     }
     void setMessageTimeStamp(const ros::Time &t) {
@@ -87,31 +88,41 @@ public:
     ros::Time   timeGrabStart;
     ros::Time   arrivalTime;
     double      cameraTimeStamp;
+    FlyCapture2::ImageMetadata metaData;
     ImagePtr    msg;
   };
 
   struct FrameQueue {
+    FrameQueue(int ida=0) : id(ida) {};
     void         addFrame(const CameraFrame &f);
     void         addFrame(int camId, bool ret, const ros::Time &ts,
-                          double camTs, const ImagePtr &msg);
+                          double camTs, const ImagePtr &msg,
+                          const FlyCapture2::ImageMetadata &md);
     CameraFrame  waitForNextFrame(bool *keepRunning);
+    int         id;
     std::mutex  mutex;
     std::condition_variable  cv;
     std::deque<CameraFrame> frames;
   };
+
+  typedef std::shared_ptr<ExposureController> ControllerPtr;
 
   class Cam: public flea3::Flea3Ros {
   public:
     explicit Cam(const ros::NodeHandle& pnh,
                  int id,
                  const std::string& prefix = std::string());
-    int updateTimeStamp(double timeStamp);
+    int  updateTimeStamp(double timeStamp);
     void setFPS(double f) { fps = f; }
+    void publishMsg(const ImagePtr &imgMsg, const FlyCapture2::ImageMetadata &md);
     // ------------------
     int         id{0};
     FrameQueue  frames;
     double      lastCameraTime{-1.0};
     double      fps{-1.0};
+    ControllerPtr exposureController;
+    float       shutterRatio{1.0};
+    float       gainRatio{1.0};
   };
 
   using CamPtr    = boost::shared_ptr<Cam>;
@@ -150,10 +161,6 @@ private:
   int                      numCamFramesWithSameTimeStamp_{0};
   ros::Time                lastTime_;
   bool                     debugTimeStamps_{false};
-  // exposure controller
-  typedef std::shared_ptr<ExposureController> ControllerPtr;
-  std::vector<ControllerPtr> exposureControllers_;
-  // configuration server
   std::shared_ptr<dynamic_reconfigure::Server<Config>> configServer_;
   // timer for shutdown
   ros::Timer               timer_;

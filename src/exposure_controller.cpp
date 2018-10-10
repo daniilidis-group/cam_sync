@@ -15,6 +15,7 @@
  */
 
 #include "cam_sync/exposure_controller.h"
+#include "cam_sync/MetaData.h"
 
 //#define DEBUG
 
@@ -25,6 +26,7 @@ namespace cam_sync {
     name_ = camName;
     configServer_.reset(new dynamic_reconfigure::Server<ExposureControlDynConfig>(nh_));
     configServer_->setCallback(boost::bind(&ExposureController::configure, this, _1, _2));
+    metaDataPub_ = nh_.advertise<MetaData>("meta_data", 1);
   }
 
   ExposureController::~ExposureController() {
@@ -122,6 +124,13 @@ namespace cam_sync {
       }
     }
   }
+
+  void ExposureController::publish(const MetaData &msg) {
+    if (metaDataPub_.getNumSubscribers() > 0) {
+      metaDataPub_.publish(msg);
+    }
+  }
+
 
   double
   ExposureController::getAverageBrightness(const unsigned char *data,

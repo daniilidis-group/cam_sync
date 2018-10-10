@@ -9,9 +9,14 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   sensor_msgs
+  message_generation
   dynamic_reconfigure
   flea3 REQUIRED        # needed for the test module
 )
+
+add_message_files(DIRECTORY msg FILES MetaData.msg)
+
+generate_messages(DEPENDENCIES std_msgs)
 
 generate_dynamic_reconfigure_options(
   cfg/CamSyncDynConfig.cfg
@@ -42,5 +47,3 @@ target_link_libraries(${PROJECT_NAME}_node
   ${PROJECT_NAME}
   ${catkin_LIBRARIES}
   )
-
-

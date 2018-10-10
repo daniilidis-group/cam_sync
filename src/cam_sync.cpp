@@ -15,7 +15,6 @@
  */
 
 #include "cam_sync/cam_sync.h"
-#include "cam_sync/exposure_controller.h"
 #include <math.h>
 #include <fstream>
 #include <boost/range/irange.hpp>
@@ -91,20 +90,41 @@ namespace cam_sync {
 
   CamSync::Cam::Cam(const ros::NodeHandle& pnh,
                     int i,
-                    const std::string& prefix) : Flea3Ros(pnh, prefix), id(i) {
+                    const std::string& prefix) : Flea3Ros(pnh, prefix), id(i), frames(id) {
+    exposureController.reset(new ExposureController(pnh, prefix));
+    shutterRatio    = camera().GetAbsToRelativeRatio(0x918, 0x81c);
+    gainRatio       = camera().GetAbsToRelativeRatio(0x928, 0x820);
   }
+
+  void CamSync::Cam::publishMsg(const ImagePtr &imgMsg,
+                                const FlyCapture2::ImageMetadata &md) {
+    Publish(imgMsg); // camera base method
+    MetaData msg;
+    msg.header        = imgMsg->header;
+    msg.timestamp     = md.embeddedTimeStamp;
+    msg.frame_counter = md.embeddedFrameCounter;
+    msg.shutter       = (float)(md.embeddedShutter & 0x00000FFF) * shutterRatio;
+    msg.gain          = (float)(md.embeddedGain    & 0x00000FFF) * gainRatio;
+    msg.wb_red        = md.embeddedWhiteBalance & 0x00000FFF;
+    msg.wb_blue       = (md.embeddedWhiteBalance & 0x00FFF000) >> 12;
+    exposureController->publish(msg);
+  }
+
 
   CamSync::CameraFrame
   CamSync::FrameQueue::waitForNextFrame(bool *keepRunning) {
     CameraFrame frame;
     std::unique_lock<std::mutex> lock(mutex);
-    const std::chrono::nanoseconds timeout((int64_t)(1000000000LL));
+    const std::chrono::microseconds timeout((int64_t)(10000000LL));
     while (ros::ok() && *keepRunning && frames.empty()) {
       cv.wait_for(lock, timeout);
     }
     if (!frames.empty()) {
       frame = frames.back();
       frames.pop_back();
+      if (frames.size() > 50) {
+        ROS_WARN_STREAM_THROTTLE(10, "cam " << id << " has queue of size " << frames.size());
+      }
     }
     return (frame);
   }
@@ -116,9 +136,11 @@ namespace cam_sync {
   }
 
   void CamSync::FrameQueue::addFrame(int camId, bool ret, const ros::Time &ts,
-                                     double camTs, const ImagePtr &msg) {
+                                     double camTs, const ImagePtr &msg,
+                                     const FlyCapture2::ImageMetadata &md) {
     std::unique_lock<std::mutex> lock(mutex);
-    frames.push_front(CameraFrame(camId, ret, ts, ros::Time::now(),  camTs, msg));
+    frames.push_front(CameraFrame(camId, ret, ts, ros::Time::now(),  camTs,
+                                  md, msg));
     cv.notify_all();
   }
 
@@ -139,7 +161,6 @@ namespace cam_sync {
       std::string camName = "cam" + std::to_string(i);
       CamPtr cam_tmp = boost::make_shared<Cam>(parentNode_, i, camName);
       cameras_.push_back(move(cam_tmp));
-      exposureControllers_.push_back(ControllerPtr(new ExposureController(parentNode_, camName)));
       timeGap_.push_back(0);
     }
     configServer_->setCallback(boost::bind(&CamSync::configure, this, _1, _2));
@@ -228,9 +249,9 @@ namespace cam_sync {
         continue;
       }
       if (rotateImage_) {
-        curCam->Publish(rotate_image(frame.msg));
+        curCam->publishMsg(rotate_image(frame.msg), frame.metaData);
       } else {
-        curCam->Publish(frame.msg);
+        curCam->publishMsg(frame.msg, frame.metaData);
       }
     }
     ROS_INFO_STREAM("frame publish thread done!");
@@ -292,7 +313,6 @@ namespace cam_sync {
       tsFile.open("/tmp/ts.txt");
     }
     ros::Time t0 = ros::Time::now();
-    const std::chrono::nanoseconds timeout((int64_t)(1000000000LL));
     while (ros::ok() && keepPolling_) {
       CameraFrame frame = cameraFrames_.waitForNextFrame(&keepPolling_);
       if (keepPolling_ && ros::ok()) {
@@ -325,11 +345,20 @@ namespace cam_sync {
       }
 #endif      
       double ts = get_pgr_timestamp(pgrImage);
+      const FlyCapture2::ImageMetadata &metaData = pgrImage.GetMetadata();
       // put the new frame in the queue
-      cameraFrames_.addFrame(camIndex, ret, t_grab_start, ts, image_msg);
+      cameraFrames_.addFrame(camIndex, ret, t_grab_start, ts, image_msg, metaData);
+      union AbsValueConversion {
+        unsigned int uint_val;
+        float float_val;
+      };
+      AbsValueConversion abs_val;
+      abs_val.uint_val = metaData.embeddedShutter;
+      //std::cout << "shutter: " << abs_val.float_val << std::endl;
+      
       if (ret) {
         double newShutter(-1.0), newGain(-1.0);
-        exposureControllers_[camIndex]->imageCallback(image_msg, &newShutter, &newGain);
+        curCam->exposureController->imageCallback(image_msg, &newShutter, &newGain);
         setShutter(curCam, newShutter);
         setGain(curCam, newGain);
       } else {
@@ -361,14 +390,15 @@ namespace cam_sync {
       config.auto_gain       = false;
 
       CamConfig cc(config);
-      cameras_[masterCamIdx_]->Stop();
-      cameras_[masterCamIdx_]->camera().Configure(cc);
-      exposureControllers_[masterCamIdx_]->setFPS(config_.fps, config_.max_free_fps);
-      exposureControllers_[masterCamIdx_]->setCurrentShutter(cc.shutter_ms);
-      exposureControllers_[masterCamIdx_]->setCurrentGain(cc.gain_db);
-      cameras_[masterCamIdx_]->setFPS(fps_);
-      cameras_[masterCamIdx_]->camera().StartCapture();
-      cameras_[masterCamIdx_]->camera().SetEnableTimeStamps(true);
+      auto masterCam = cameras_[masterCamIdx_];
+      masterCam->Stop();
+      masterCam->camera().Configure(cc);
+      masterCam->exposureController->setFPS(config_.fps, config_.max_free_fps);
+      masterCam->exposureController->setCurrentShutter(cc.shutter_ms);
+      masterCam->exposureController->setCurrentGain(cc.gain_db);
+      masterCam->setFPS(fps_);
+      masterCam->camera().StartCapture();
+      masterCam->camera().SetEnableTimeStamps(true);
     }
     
     // Switch on trigger for slave
@@ -386,9 +416,9 @@ namespace cam_sync {
         curCam->Stop();
         curCam->camera().Configure(cc2);
         curCam->camera().SetEnableTimeStamps(true);
-        exposureControllers_[i]->setFPS(config_.fps, config_.max_free_fps);
-        exposureControllers_[i]->setCurrentShutter(cc2.shutter_ms);
-        exposureControllers_[i]->setCurrentGain(cc2.gain_db);
+        curCam->exposureController->setFPS(config_.fps, config_.max_free_fps);
+        curCam->exposureController->setCurrentShutter(cc2.shutter_ms);
+        curCam->exposureController->setCurrentGain(cc2.gain_db);
         curCam->setFPS(fps_);
         curCam->camera().StartCapture();
       }
