@@ -45,7 +45,7 @@ class CamSync {
   
 public:
   using ThreadPtr = boost::shared_ptr<boost::thread>;
-  using ImagePtr  = boost::shared_ptr<sensor_msgs::Image>;
+  using ImagePtr  = sensor_msgs::ImagePtr;
   using CamConfig = flea3::Flea3DynConfig;
   using Config    = CamSyncDynConfig;
   using Time      = ros::Time;
