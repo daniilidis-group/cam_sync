@@ -11,6 +11,7 @@
   <arg name="trigger_source"  default="3"/>
   <arg name="master_camera_index"  default="0"/>
   <arg name="debug_timestamps"  default="false"/>
+  <arg name="dt_avg_time"  default="10.0"/>
   <arg name="gain_db"  default="0"/>
   
   <arg name="autoexp_enabled"  default="false"/>
@@ -42,11 +43,13 @@
   <arg name="calib_dir" default="NO_CALIB_DIR_PROVIDED" />
 
   <!-- Broadcast camera image for specified amount of time. -->
+  #	launch-prefix="gdb -ex run --args"
   <node pkg="cam_sync" type="cam_sync_node" name="cam_sync"
 	required="true" output="$(arg output)">
-    <rosparam command="load" file="$(find bird_recording)/$(arg exposure_control_file)" if="$(arg autoexp_enabled)"/>
+    <rosparam command="load" file="$(arg exposure_control_file)" if="$(arg autoexp_enabled)"/>
     <param name="rotate_image" type="bool" value="$(arg rotate_image)"/>
     <param name="debug_timestamps"  type="bool" value="$(arg debug_timestamps)"/>
+    <param name="dt_avg_time"  type="double" value="$(arg dt_avg_time)"/>
     <param name="master_camera_index" type="int"  value="$(arg master_camera_index)"/>
     <param name="cam0/identifier" type="string" value="$(arg cam0)"/>
     <param name="cam1/identifier" type="string" value="$(arg cam1)"/>

@@ -118,17 +118,18 @@ public:
   public:
     explicit Cam(const ros::NodeHandle& pnh, int id, bool debug,
                  const std::string& prefix = std::string());
-    bool     updateCameraTime(unsigned int frameCount,
-                              const WallTime &arrivalTime,
-                              WallTime *frameTime);
-    void     setFPS(double f);
-    void     publishMsg(const ImagePtr &imgMsg,
-                        const FlyCapture2::ImageMetadata &md);
-    FrameQueue &getFrames() { return (frames_); }
+    FrameQueue    &getFrames() { return (frames_); }
+    double        updateCameraTime(unsigned int frameCount,
+                                   const WallTime &arrivalTime,
+                                   double dtAvg,
+                                   WallTime *frameTime);
+    void          setFPS(double f);
+    void          publishMsg(const ImagePtr &imgMsg,
+                             const FlyCapture2::ImageMetadata &md);
     ControllerPtr getExposureController() { return (exposureController_); }
-    void     logStats(double dt);
+    void          logStats(double dt);
   private:
-    // ------------------
+    // ------------------ variables
     int           id_{0};
     FrameQueue    frames_;
     ControllerPtr exposureController_;
@@ -136,9 +137,8 @@ public:
     float         shutterRatio_{1.0};
     float         gainRatio_{1.0};
     unsigned int  lastFrameCount_{0};
-    WallTime      lastArrivalTime_ {WallTime(0)};
-    WallTime      cameraTime_ {WallTime(0)};
-    double        dt_{0.03};
+    WallTime      lastArrivalTime_{WallTime(0)};
+    WallTime      cameraTime_{WallTime(0)};
     double        offset_{0};
     unsigned int  frameCount_{0};
     unsigned int  framesDropped_{0};
@@ -147,7 +147,7 @@ public:
     std::ofstream debugFile_;
   };
 
-  using CamPtr    = boost::shared_ptr<Cam>;
+  using CamPtr = boost::shared_ptr<Cam>;
 
 private:
   // Thread functions are private.
@@ -170,6 +170,8 @@ private:
   bool                     keepPolling_{false};
   
   double                   fps_{15.0};
+  double                   dtAvgConst_;
+  double                   dt_{0.025};
 
   std::vector<CamPtr>      cameras_;
   // frames detected

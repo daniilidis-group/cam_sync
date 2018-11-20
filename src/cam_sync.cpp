@@ -19,6 +19,7 @@
 #include <fstream>
 #include <boost/range/irange.hpp>
 #include <iomanip>
+#include <algorithm>
 
 
 //#define SIMULATE_FRAME_DROPS
@@ -169,17 +170,19 @@ namespace cam_sync {
     double logInterval;
     parentNode.param<double>("logging_interval", logInterval, 60.0);
     logInterval_ = ros::WallDuration(logInterval);
-    
-
-    double fps;
+    double fps(30.0);
     parentNode.getParam("fps", fps);
     setFPS(fps);
+    double dtAvgTime;
+    parentNode.param<double>("dt_avg_time", dtAvgTime, 10.0);
+    dtAvgConst_ = 1.0 / (dtAvgTime * fps * numCameras_);
+    dt_         = 1.0 / fps;  // starting estimate for average
 
     for (int i = 0; i < numCameras_; i++) {
       std::string camName = "cam" + std::to_string(i);
-      CamPtr cam_tmp = boost::make_shared<Cam>(parentNode_, i,
-                                               debugTimeStamps_, camName);
-      cameras_.push_back(move(cam_tmp));
+      CamPtr camTmp = boost::make_shared<Cam>(parentNode_, i,
+                                              debugTimeStamps_, camName);
+      cameras_.push_back(move(camTmp));
     }
     configServer_->setCallback(boost::bind(&CamSync::configure, this, _1, _2));
   }
@@ -277,14 +280,17 @@ namespace cam_sync {
 
   bool CamSync::updateTimeStatistics(const CameraFrame &frame) {
     const auto &cam = cameras_[frame.cameraId];
-    cam->updateCameraTime(frame.cameraFrameCount,
-                          frame.arrivalTime, &currentFrameTime_);
+    const double dt = cam->updateCameraTime(frame.cameraFrameCount,
+                                            frame.arrivalTime,
+                                            dt_, &currentFrameTime_);
+    const double lowLim(0.3 * dt_), upLim(1.7 * dt_);
+    const double dtc = (dt < lowLim) ? lowLim : ((dt > upLim) ? upLim : dt);
+    dt_ = dt_ * (1.0 - dtAvgConst_) + dtAvgConst_ * dt;
     return (true);
   }
 
   void CamSync::Cam::setFPS(double f) {
     fps_ = f;
-    dt_  = 1.0 / fps_;  // starting estimate, will be measured
   }
 
   /*
@@ -294,9 +300,10 @@ namespace cam_sync {
    * The global frame time is updated here as well, by whichever camera
    * gets the new frame first.
    */
-  bool
+  double
   CamSync::Cam::updateCameraTime(unsigned int frameCount,
                                  const WallTime &arrivalTime,
+                                 double dtAvg, 
                                  WallTime *currentFrameTime) {
     if (lastArrivalTime_ == WallTime(0) || fps_ < 0) {
       // called first time
@@ -306,7 +313,7 @@ namespace cam_sync {
         *currentFrameTime  = arrivalTime;
       }
       lastFrameCount_ = frameCount;
-      return (false);
+      return (dtAvg);
     }
     // Guard against wrap of frame numbers, in a very crude way.
     // At 40 fps, wrap around will occur after about 3 years
@@ -328,19 +335,17 @@ namespace cam_sync {
     // of the time between frames, and use that to increment the camera time,
     // taking into account that a camera may skip a frame.
 
-    const double alpha_dt = 0.004; // integration constant [in 1/frames!]
     const double dt = (arrivalTime - lastArrivalTime_).toSec() / nframes;
-    dt_ = dt_ * (1.0 - alpha_dt) + alpha_dt * dt;
 
     // advance camera time by average time interval
-    cameraTime_ = cameraTime_ + ros::WallDuration(dt_ * nframes);
+    cameraTime_ = cameraTime_ + ros::WallDuration(dtAvg * nframes);
     
     // keep the old values around
     lastFrameCount_  = frameCount;
     lastArrivalTime_ = arrivalTime;
 
     // if a new frame started, update currentFrameTime
-    if ((cameraTime_ - *currentFrameTime).toSec()  > 0.6 * dt_) {
+    if ((cameraTime_ - *currentFrameTime).toSec()  > 0.6 * dtAvg) {
       *currentFrameTime = cameraTime_;
     }
     // now bias the camera time such that it:
@@ -353,17 +358,19 @@ namespace cam_sync {
     //     frame, this introduces coupling between the
     //     cameras such that they strife to maintain a common time.
     
-    const double alpha         = 0.002;  // time integration constant
+    const double alpha_a       = 0.002;
+    const double alpha_f       = 0.005;
     const double arrivalOffset = (arrivalTime       - cameraTime_).toSec();
     const double frameOffset   = (*currentFrameTime - cameraTime_).toSec();
-    cameraTime_ += ros::WallDuration((arrivalOffset + frameOffset) * alpha);
+    cameraTime_ += ros::WallDuration(arrivalOffset * alpha_a +
+                                     frameOffset * alpha_f);
 
     // For diagnostic purposes, average the offset between the arrival
     // time and the currentFrameTime. This average must be less than
     // 1/2 of the frame time, or else the images cannot belong to the
     // same frame!
     const double alphaOffset = 0.0025;  // integration const [1/frames]
-    double error = (arrivalTime - *currentFrameTime).toSec() / dt_;
+    double error = (arrivalTime - *currentFrameTime).toSec() / dtAvg;
     offset_ = offset_ * (1.0 - alphaOffset) +  alphaOffset * error;
     variance_ += (error - offset_) * (error - offset_); // good enough
     
@@ -377,11 +384,11 @@ namespace cam_sync {
                  << *currentFrameTime - STARTUP_TIME << " "  // 3
                  << offset_ << " "                           // 4
                  << dt << " "                                // 5
-                 << dt_ << " "                               // 6
+                 << dtAvg << " "                             // 6
                  << frameCount                               // 7
                  << std::endl;
     }
-    return (true);
+    return (dt);
   }
 
   void CamSync::timeStampThread() {
@@ -423,19 +430,13 @@ namespace cam_sync {
         continue;
       }
 #endif      
-      const FlyCapture2::ImageMetadata &metaData = pgrImage.GetMetadata();
-      WallTime arrivalTime = WallTime::now();
-      // put the new frame in the queue
-      cameraFrames_.addFrame(camIndex, ret, grabTime, arrivalTime,
-                             metaData.embeddedFrameCounter, image_msg, metaData);
-      union AbsValueConversion {
-        unsigned int uint_val;
-        float float_val;
-      };
-      AbsValueConversion abs_val;
-      abs_val.uint_val = metaData.embeddedShutter;
-      
       if (ret) {
+        WallTime arrivalTime = WallTime::now();
+        const FlyCapture2::ImageMetadata &metaData = pgrImage.GetMetadata();
+        // put the new frame in the queue
+        cameraFrames_.addFrame(camIndex, ret, grabTime, arrivalTime,
+                               metaData.embeddedFrameCounter, image_msg, metaData);
+        // update exposure control
         double newShutter(-1.0), newGain(-1.0);
         curCam->getExposureController()->imageCallback(
           image_msg, &newShutter, &newGain);
