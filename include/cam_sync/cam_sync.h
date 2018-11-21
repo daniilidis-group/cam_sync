@@ -121,14 +121,19 @@ public:
     FrameQueue    &getFrames() { return (frames_); }
     double        updateCameraTime(unsigned int frameCount,
                                    const WallTime &arrivalTime,
-                                   double dtAvg,
-                                   WallTime *frameTime);
+                                   double dtAvg, WallTime *frameTime,
+                                   std::list<WallTime> *frameTimes);
     void          setFPS(double f);
     void          publishMsg(const ImagePtr &imgMsg,
                              const FlyCapture2::ImageMetadata &md);
     ControllerPtr getExposureController() { return (exposureController_); }
     void          logStats(double dt);
+    double        getDecayFactor(const WallTime &t) const;
+
   private:
+    WallTime      findFrameTime(const WallTime &cameraTime,
+                                std::list<WallTime> *frameTimes,
+                                const double dtAvg);
     // ------------------ variables
     int           id_{0};
     FrameQueue    frames_;
@@ -139,6 +144,7 @@ public:
     unsigned int  lastFrameCount_{0};
     WallTime      lastArrivalTime_{WallTime(0)};
     WallTime      cameraTime_{WallTime(0)};
+    WallTime      firstArrivalTime_{WallTime(0)};
     double        offset_{0};
     unsigned int  frameCount_{0};
     unsigned int  framesDropped_{0};
@@ -157,7 +163,7 @@ private:
   void frameGrabThread(int camIndex);
   void framePublishThread(int camIndex);
   void setFPS(double fps);
-  bool updateTimeStatistics(const CameraFrame &frame);
+  bool updateTimeStatistics(const CameraFrame &frame, WallTime *frameTime);
 
   // Variables for the camera state
   ros::NodeHandle          parentNode_;
@@ -176,7 +182,7 @@ private:
   std::vector<CamPtr>      cameras_;
   // frames detected
   FrameQueue               cameraFrames_;
-  WallTime                 currentFrameTime_{WallTime(0)};
+  std::list<WallTime>      frameTimes_;
   WallTime                 lastLogTime_;
   ros::WallDuration        logInterval_;
   

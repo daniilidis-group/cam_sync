@@ -1,5 +1,5 @@
-/* -*-c++-*--------------------------------------------------------------------                                                                                                                                    
- * 2018 Bernd Pfrommer bernd.pfrommer@gmail.com                                                                                                                                                                    
+/* -*-c++-*--------------------------------------------------------------------
+ * 2018 Bernd Pfrommer bernd.pfrommer@gmail.com
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -98,8 +98,8 @@ namespace cam_sync {
     msg.header        = imgMsg->header;
     msg.timestamp     = md.embeddedTimeStamp;
     msg.frame_counter = md.embeddedFrameCounter;
-    msg.shutter       = (float)(md.embeddedShutter & 0x00000FFF) * shutterRatio_;
-    msg.gain          = (float)(md.embeddedGain    & 0x00000FFF) * gainRatio_;
+    msg.shutter       = (float)(md.embeddedShutter & 0x00000FFF)*shutterRatio_;
+    msg.gain          = (float)(md.embeddedGain   & 0x00000FFF) *gainRatio_;
     msg.wb_red        = md.embeddedWhiteBalance & 0x00000FFF;
     msg.wb_blue       = (md.embeddedWhiteBalance & 0x00FFF000) >> 12;
     exposureController_->publish(msg);
@@ -120,6 +120,159 @@ namespace cam_sync {
     variance_             = 0;
   }
 
+  void CamSync::Cam::setFPS(double f) {
+    fps_ = f;
+  }
+  
+  double
+  CamSync::Cam::getDecayFactor(const WallTime &t) const {
+    return (t > firstArrivalTime_ + ros::WallDuration(3.0) ? 1.0 : 100.0); 
+  }
+
+  ros::WallTime
+  CamSync::Cam::findFrameTime(const WallTime &cameraTime,
+                              std::list<WallTime> *frameTimes,
+                              const double dtAvg) {
+    WallTime frameTime(0);
+    // step through the known frame times, starting with the most recent
+    // and going towards the oldest in the list
+    for (auto it = frameTimes->begin(); it != frameTimes->end(); ++it) {
+      double tdiff = (cameraTime - *it).toSec();
+      if (tdiff > 0.6 * dtAvg) {
+        // this must be a newer frame, insert it into list
+        frameTimes->insert(it, cameraTime); // goes in before(!) iterator
+        frameTime = cameraTime;
+        break;
+      }
+      if (std::abs(tdiff) <= 0.6 * dtAvg) {
+        // matches an existing frame
+        frameTime = *it;
+        break;
+      }
+    }
+
+    // if we have not inserted it anywhere, it must be at the end of
+    // the list of time frames, or the list of frames is empty.
+ 
+    if (frameTime == WallTime(0)) {
+      if (!frameTimes->empty()) { // not found in list, and list not empty!
+        // cameraTime is so old that we have already cleared the list
+        auto late = (frameTimes->back() - cameraTime).toSec() / dtAvg;
+        ROS_WARN_STREAM(id_ << " got frame that is late by "
+                        << late << " frames");
+      }
+      frameTime = cameraTime; // establish a new frame time
+      frameTimes->push_back(cameraTime);
+    }
+    // 
+    if (frameTimes->size() * dtAvg > 0.5) { // limit list size to 0.5sec
+      frameTimes->pop_back();
+    }
+    return (frameTime);
+  }
+
+  /*
+   * updateCameraTime() primarily maintains a per-camera clock.
+   * This is done by using the frame numbers that are embedded
+   * in the image, and the wall clock arrival times of the images.
+   * The global frame time is updated here as well, by whichever camera
+   * gets the new frame first.
+   */
+  double
+  CamSync::Cam::updateCameraTime(unsigned int frameCount,
+                                 const WallTime &arrivalTime,
+                                 double dtAvg, WallTime *frameTime,
+                                 std::list<WallTime> *frameTimes) {
+    if (lastArrivalTime_ == WallTime(0) || fps_ < 0) {
+      // called first time
+      lastArrivalTime_  = arrivalTime;
+      firstArrivalTime_ = arrivalTime;
+      cameraTime_       = arrivalTime;
+      *frameTime        = arrivalTime;
+      lastFrameCount_   = frameCount;
+      return (dtAvg);
+    }
+    // Guard against wrap of frame numbers, in a very crude way.
+    // At 40 fps, wrap around will occur after about 3 years
+    // of continuous running. So in fact, this save-guard has never
+    // been tested!
+    if (frameCount == lastFrameCount_) {
+      ROS_WARN_STREAM("camera " << id_ << " got duplicate frame: "
+                      << frameCount);
+    }
+    int nframes = (frameCount > lastFrameCount_) ?
+      (frameCount - lastFrameCount_) : 1;
+    frameCount_ += nframes; // count in even the skipped ones
+
+    // Unfortunately, the point grey camera timestamps are not all
+    // that clean and equally well spaced, so we don't use them.
+    // The source of noise is not clear. It could be that the trigger
+    // source is not running as smoothly as one would expect, who knows.
+    //
+    // To update the camera time, we maintain a running average
+    // of the time between frames, and use that to increment the camera time,
+    // taking into account that a camera may skip a frame.
+
+    const double dt = (arrivalTime - lastArrivalTime_).toSec() / nframes;
+
+    // advance camera time by average time interval
+    cameraTime_ = cameraTime_ + ros::WallDuration(dtAvg * nframes);
+    
+    // keep the old values around
+    lastFrameCount_  = frameCount;
+    lastArrivalTime_ = arrivalTime;
+
+    // look in a global list if another camera has already
+    // established a frame time for this frame. If not, create a new one.
+
+    *frameTime = findFrameTime(cameraTime_, frameTimes, dtAvg);
+
+    // now bias the camera time such that it:
+    //  a) drifts towards the average arrival time, i.e.
+    //     if there was just mean zero noise on the arrival times,
+    //     after a while the camera time would equal the
+    //     expected arrival time.
+    //  b) drifts towards the frameTime. As the frame time is only
+    //     updated by the first camera that receives the new
+    //     frame, this introduces coupling between the
+    //     cameras such that they strife to maintain a common time.
+
+    // alpha_a speed [1/frames] of converg. of cam time to avg arrival time
+    const double alpha_a       = 0.02;
+    // alpha_f speed [1/frames] of converg. of cam time to [global] frame time
+    const double alpha_f       = 0.005;
+
+    const double arrivalOffset = (arrivalTime  - cameraTime_).toSec();
+    const double frameOffset   = (*frameTime   - cameraTime_).toSec();
+    cameraTime_ += ros::WallDuration(arrivalOffset * alpha_a +
+                                     frameOffset * alpha_f);
+
+    // For diagnostic purposes, average the offset between the arrival
+    // time and the frameTime. This average must be less than
+    // 1/2 of the frame time, or else the images cannot belong to the
+    // same frame!
+    const double alphaOffset = 0.025;  // integration const [1/frames]
+    double error = (arrivalTime - *frameTime).toSec() / dtAvg;
+    offset_ = offset_ * (1.0 - alphaOffset) +  alphaOffset * error;
+    variance_ += (error - offset_) * (error - offset_); // good enough
+    
+    if (nframes != 1) {
+      ROS_WARN_STREAM("camera " << id_ << " dropped frames: " << nframes - 1);
+      framesDropped_ += nframes - 1;
+    }
+    if (debug_) {
+      debugFile_ << arrivalTime - STARTUP_TIME  << " "       // 1
+                 << cameraTime_ - STARTUP_TIME << " "        // 2
+                 << *frameTime  - STARTUP_TIME << " "        // 3
+                 << offset_ << " "                           // 4
+                 << dt << " "                                // 5
+                 << dtAvg << " "                             // 6
+                 << frameCount                               // 7
+                 << std::endl;
+    }
+    return (dt);
+  }
+
   CamSync::CameraFrame
   CamSync::FrameQueue::waitForNextFrame(bool *keepRunning) {
     CameraFrame frame;
@@ -132,6 +285,8 @@ namespace cam_sync {
       frame = frames.back();
       frames.pop_back();
       if (frames.size() > 50) {
+        // Ouch, we have built up a queue. This will consume a lot
+        // of memory!
         ROS_WARN_STREAM_THROTTLE(10, "cam " << id << " has queue of size "
                                  << frames.size());
         hasQueueBuildup = true;
@@ -150,9 +305,12 @@ namespace cam_sync {
     cv.notify_all();
   }
 
-  void CamSync::FrameQueue::addFrame(int camId, bool ret, const WallTime &tgrab,
-      const WallTime &arrivalTime, unsigned int frameCnt,
-      const ImagePtr &msg, const FlyCapture2::ImageMetadata &md) {
+  void
+  CamSync::FrameQueue::addFrame(int camId, bool ret, const WallTime &tgrab,
+                                const WallTime &arrivalTime,
+                                unsigned int frameCnt,
+                                const ImagePtr &msg,
+                                const FlyCapture2::ImageMetadata &md) {
     std::unique_lock<std::mutex> lock(mutex);
     frames.push_front(CameraFrame(camId, ret, tgrab, arrivalTime, frameCnt,
                                   md, msg));
@@ -187,8 +345,7 @@ namespace cam_sync {
     configServer_->setCallback(boost::bind(&CamSync::configure, this, _1, _2));
   }
 
-  CamSync::~CamSync()
-  {
+  CamSync::~CamSync() {
     stopPoll();
   }
 
@@ -278,117 +435,20 @@ namespace cam_sync {
     ROS_INFO_STREAM("frame publish thread done!");
   }
 
-  bool CamSync::updateTimeStatistics(const CameraFrame &frame) {
+  bool CamSync::updateTimeStatistics(const CameraFrame &frame,
+                                     WallTime *frameTime) {
     const auto &cam = cameras_[frame.cameraId];
     const double dt = cam->updateCameraTime(frame.cameraFrameCount,
                                             frame.arrivalTime,
-                                            dt_, &currentFrameTime_);
+                                            dt_, frameTime,
+                                            &frameTimes_);
     const double lowLim(0.3 * dt_), upLim(1.7 * dt_);
     const double dtc = (dt < lowLim) ? lowLim : ((dt > upLim) ? upLim : dt);
-    dt_ = dt_ * (1.0 - dtAvgConst_) + dtAvgConst_ * dt;
+    // During the first few frames the dt from the camera are
+    // very noisy, so discount them faster
+    const double decay = dtAvgConst_ * cam->getDecayFactor(frame.arrivalTime);
+    dt_ = dt_ * (1.0 - decay) + decay * dt;
     return (true);
-  }
-
-  void CamSync::Cam::setFPS(double f) {
-    fps_ = f;
-  }
-
-  /*
-   * updateCameraTime() primarily maintains a per-camera clock.
-   * This is done by using the frame numbers that are embedded
-   * in the image, and the wall clock arrival times of the images.
-   * The global frame time is updated here as well, by whichever camera
-   * gets the new frame first.
-   */
-  double
-  CamSync::Cam::updateCameraTime(unsigned int frameCount,
-                                 const WallTime &arrivalTime,
-                                 double dtAvg, 
-                                 WallTime *currentFrameTime) {
-    if (lastArrivalTime_ == WallTime(0) || fps_ < 0) {
-      // called first time
-      lastArrivalTime_  = arrivalTime;
-      cameraTime_       = arrivalTime;
-      if (*currentFrameTime == WallTime(0)) {
-        *currentFrameTime  = arrivalTime;
-      }
-      lastFrameCount_ = frameCount;
-      return (dtAvg);
-    }
-    // Guard against wrap of frame numbers, in a very crude way.
-    // At 40 fps, wrap around will occur after about 3 years
-    // of continuous running. So in fact, this save-guard has never
-    // been tested!
-    if (frameCount == lastFrameCount_) {
-      ROS_WARN_STREAM("camera " << id_ << " got duplicate frame: "
-                      << frameCount);
-    }
-    int nframes = (frameCount > lastFrameCount_) ?
-      (frameCount - lastFrameCount_) : 1;
-    frameCount_ += nframes; // count in even the skipped ones
-
-    // Unfortunately, the camera timestamps are not all that clean and
-    // equally well spaced, either. The source of noise is not clear.
-    // It could be that the trigger source is not running as
-    // smoothly as one would expect, who knows.
-    // To update the camera timestamps, we maintain a running average
-    // of the time between frames, and use that to increment the camera time,
-    // taking into account that a camera may skip a frame.
-
-    const double dt = (arrivalTime - lastArrivalTime_).toSec() / nframes;
-
-    // advance camera time by average time interval
-    cameraTime_ = cameraTime_ + ros::WallDuration(dtAvg * nframes);
-    
-    // keep the old values around
-    lastFrameCount_  = frameCount;
-    lastArrivalTime_ = arrivalTime;
-
-    // if a new frame started, update currentFrameTime
-    if ((cameraTime_ - *currentFrameTime).toSec()  > 0.6 * dtAvg) {
-      *currentFrameTime = cameraTime_;
-    }
-    // now bias the camera time such that it:
-    //  a) drifts towards the average arrival time, i.e.
-    //     if there was just mean zero noise on the arrival times,
-    //     after a while the camera time would equal the
-    //     expected arrival time.
-    //  b) drifts towards the frameTime. As the frame time is only
-    //     updated by the first camera that receives the new
-    //     frame, this introduces coupling between the
-    //     cameras such that they strife to maintain a common time.
-    
-    const double alpha_a       = 0.002;
-    const double alpha_f       = 0.005;
-    const double arrivalOffset = (arrivalTime       - cameraTime_).toSec();
-    const double frameOffset   = (*currentFrameTime - cameraTime_).toSec();
-    cameraTime_ += ros::WallDuration(arrivalOffset * alpha_a +
-                                     frameOffset * alpha_f);
-
-    // For diagnostic purposes, average the offset between the arrival
-    // time and the currentFrameTime. This average must be less than
-    // 1/2 of the frame time, or else the images cannot belong to the
-    // same frame!
-    const double alphaOffset = 0.0025;  // integration const [1/frames]
-    double error = (arrivalTime - *currentFrameTime).toSec() / dtAvg;
-    offset_ = offset_ * (1.0 - alphaOffset) +  alphaOffset * error;
-    variance_ += (error - offset_) * (error - offset_); // good enough
-    
-    if (nframes != 1) {
-      ROS_WARN_STREAM("camera " << id_ << " dropped frames: " << nframes - 1);
-      framesDropped_ += nframes - 1;
-    }
-    if (debug_) {
-      debugFile_ << arrivalTime - STARTUP_TIME  << " "       // 1
-                 << cameraTime_ - STARTUP_TIME << " "        // 2
-                 << *currentFrameTime - STARTUP_TIME << " "  // 3
-                 << offset_ << " "                           // 4
-                 << dt << " "                                // 5
-                 << dtAvg << " "                             // 6
-                 << frameCount                               // 7
-                 << std::endl;
-    }
-    return (dt);
   }
 
   void CamSync::timeStampThread() {
@@ -398,8 +458,9 @@ namespace cam_sync {
       CameraFrame frame = cameraFrames_.waitForNextFrame(&keepPolling_);
       if (keepPolling_ && ros::ok()) {
         // got valid frame, send it to respective camera
-        if (updateTimeStatistics(frame)) {
-          frame.setMessageTimeStamp(currentFrameTime_);
+        WallTime frameTime;
+        if (updateTimeStatistics(frame, &frameTime)) {
+          frame.setMessageTimeStamp(frameTime);
           // move frame to camera thread
           cameras_[frame.cameraId]->getFrames().addFrame(frame);
         }
@@ -515,9 +576,11 @@ namespace cam_sync {
       for (int i = 0; i < numCameras_; ++i) {
         cameras_[i]->camera().StartCapture();
         frameGrabThreads_.push_back(
-          boost::make_shared<boost::thread>(&CamSync::frameGrabThread, this, i));
+          boost::make_shared<boost::thread>(&CamSync::frameGrabThread,
+                                            this, i));
         framePublishThreads_.push_back(
-          boost::make_shared<boost::thread>(&CamSync::framePublishThread, this, i));
+          boost::make_shared<boost::thread>(&CamSync::framePublishThread,
+                                            this, i));
       }
       if (!timeStampThread_) {
         timeStampThread_ =
