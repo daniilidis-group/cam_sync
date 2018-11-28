@@ -47,11 +47,39 @@ namespace cam_sync {
 class CamSync {
   
 public:
-  using ThreadPtr = boost::shared_ptr<boost::thread>;
-  using ImagePtr  = sensor_msgs::ImagePtr;
-  using CamConfig = flea3::Flea3DynConfig;
-  using Config    = CamSyncDynConfig;
-  using WallTime  = ros::WallTime;
+  using ThreadPtr    = boost::shared_ptr<boost::thread>;
+  using ImagePtr     = sensor_msgs::ImagePtr;
+  using CamConfig    = flea3::Flea3DynConfig;
+  using Config       = CamSyncDynConfig;
+  using WallTime     = ros::WallTime;
+  using WallDuration = ros::WallDuration;
+  //
+  // GlobalTime keeps track of a unified global time
+  // that is used establish the time stamp for the
+  // outgoing frames
+  
+  class GlobalTime {
+  public:
+    GlobalTime() : sumOffsets_{0}, numOffsets_{0} {};
+    WallTime findFrameTime(const WallTime &cameraTime,
+                           const double dtAvg);
+
+    double getAvg() const  {
+      return (numOffsets_ > 0 ? sumOffsets_/numOffsets_ : 0);
+    }
+    void resetOffset() {
+      numOffsets_ = 0;
+      sumOffsets_ = 0;
+    }
+    void recordOffset(double tdiff) {
+      sumOffsets_ += tdiff;
+      numOffsets_++;
+    }
+  private:
+    std::list<WallTime> frameTimes_;
+    double sumOffsets_{0};
+    int    numOffsets_{0};
+  };
 
   CamSync(const ros::NodeHandle& parentNode);
   ~CamSync();
@@ -68,7 +96,8 @@ public:
   void timerCallback(const ros::TimerEvent &event);
 
   struct CameraFrame {
-    CameraFrame(int camId = 0, bool iv = false, const WallTime &tgrab = WallTime(0),
+    CameraFrame(int camId = 0, bool iv = false,
+                const WallTime &tgrab = WallTime(0),
                 const WallTime &ta = WallTime(0),
                 unsigned int frameCnt = 0,
                 const FlyCapture2::ImageMetadata &md =
@@ -113,27 +142,42 @@ public:
   };
 
   typedef std::shared_ptr<ExposureController> ControllerPtr;
+  
 
   class Cam: public flea3::Flea3Ros {
   public:
-    explicit Cam(const ros::NodeHandle& pnh, int id, bool debug,
+    explicit Cam(const ros::NodeHandle& pnh, int id,
+                 int lagThresh,  double arrivalToCamTimeCoeff, bool debug,
                  const std::string& prefix = std::string());
     FrameQueue    &getFrames() { return (frames_); }
+    inline bool timeStatsInitialized() const {
+      return (lastArrivalTime_ != WallTime(0) && fps_ > 0);
+    }
+    void setCameraTime(const WallTime &t) { cameraTime_ = t; }
+    void initializeTimeStats(unsigned int frameCount,
+                             const WallTime &t);
+    double  gotNewFrame(unsigned int frameCount,
+                        const WallTime &arrivalTime,
+                        double dtA,
+                        int *nframes);
+    bool    updateCameraTime(const WallTime &arrivalTime,
+                             int nframes, double dtAvg,
+                             WallTime *frameTime,
+                             GlobalTime *globalTime);
+
     double        updateCameraTime(unsigned int frameCount,
                                    const WallTime &arrivalTime,
                                    double dtAvg, WallTime *frameTime,
-                                   std::list<WallTime> *frameTimes);
+                                   GlobalTime *globalTime,
+                                   bool *gotValidFrame);
     void          setFPS(double f);
     void          publishMsg(const ImagePtr &imgMsg,
                              const FlyCapture2::ImageMetadata &md);
     ControllerPtr getExposureController() { return (exposureController_); }
     void          logStats(double dt);
-    double        getDecayFactor(const WallTime &t) const;
+    bool          isWarmedUp(const WallTime &t) const;
 
   private:
-    WallTime      findFrameTime(const WallTime &cameraTime,
-                                std::list<WallTime> *frameTimes,
-                                const double dtAvg);
     // ------------------ variables
     int           id_{0};
     FrameQueue    frames_;
@@ -145,20 +189,21 @@ public:
     WallTime      lastArrivalTime_{WallTime(0)};
     WallTime      cameraTime_{WallTime(0)};
     WallTime      firstArrivalTime_{WallTime(0)};
+    WallTime      lastFrameTime_{0};
     double        offset_{0};
     unsigned int  frameCount_{0};
     unsigned int  framesDropped_{0};
+    int           lagCounter_{0};
+    int           lagThreshold_{10};
     double        variance_{0};
     bool          debug_{true};
+    double        arrivalToCameraTimeCoeff_{0.005};
     std::ofstream debugFile_;
   };
 
   using CamPtr = boost::shared_ptr<Cam>;
 
 private:
-  // Thread functions are private.
-  void pollImages();
-  void triggerThread();
   void timeStampThread();
   void frameGrabThread(int camIndex);
   void framePublishThread(int camIndex);
@@ -178,13 +223,16 @@ private:
   double                   fps_{15.0};
   double                   dtAvgConst_;
   double                   dt_{0.025};
+  double                   dtVar_{3e-5};
+  double                   dtVarThreshold_{0};
+  bool                     warmedUp_{false};
 
   std::vector<CamPtr>      cameras_;
-  // frames detected
-  FrameQueue               cameraFrames_;
-  std::list<WallTime>      frameTimes_;
+  FrameQueue               cameraFrames_; // frames before dispatch
+  GlobalTime               globalTime_;   // keeps track of global time
+
   WallTime                 lastLogTime_;
-  ros::WallDuration        logInterval_;
+  WallDuration             logInterval_;
   
   bool                     debugTimeStamps_{false};
   
