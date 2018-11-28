@@ -29,7 +29,16 @@ namespace cam_sync {
   using boost::irange;
 
   static ros::WallTime STARTUP_TIME = ros::WallTime::now();
-
+  
+  static double get_pgr_timestamp(const flea3::Image &pgrImage) {
+    flea3::TimeStamp ts = pgrImage.GetTimeStamp();
+    const double CYCLE_COUNT_TO_SEC = 0.000125; // 8kHz
+    const double CYCLE_OFFSET_TO_SEC= CYCLE_COUNT_TO_SEC / 4096; // 12 bit
+    double tstamp = ts.cycleSeconds + ts.cycleCount * CYCLE_COUNT_TO_SEC +
+      ts.cycleOffset * CYCLE_OFFSET_TO_SEC;
+    return (tstamp);
+  }
+  
   static void setShutter(CamSync::CamPtr cam, double s) {
     if (s == -1.0) return;
     bool auto_shutter(false);
@@ -181,44 +190,61 @@ namespace cam_sync {
   }
 
   void
-  CamSync::Cam::initializeTimeStats(unsigned int frameCount,
-                                    const WallTime &arrivalTime) {
-    lastArrivalTime_  = arrivalTime;
-    firstArrivalTime_ = arrivalTime;
-    cameraTime_       = arrivalTime;
-    lastFrameTime_    = arrivalTime;
-    lastFrameCount_   = frameCount;
+  CamSync::Cam::initializeTimeStats(const CameraFrame &f) {
+    lastArrivalTime_  = f.arrivalTime;
+    firstArrivalTime_ = f.arrivalTime;
+    cameraTime_       = f.arrivalTime;
+    lastFrameTime_    = f.arrivalTime;
+    imageTime_        = f.arrivalTime;
+    lastFrameCount_   = f.metaData.embeddedFrameCounter;
+    lastCameraClock_  = f.cameraClock;
   }
+
+  void CamSync::Cam::updateImageTime(const CameraFramePtr &fp) {
+    // wrap around, see point grey documents
+    if (lastCameraClock_ > fp->cameraClock) lastCameraClock_ -= 128.0;
+    // now compute correct time delta
+    const double dt   = fp->cameraClock - lastCameraClock_;
+    lastCameraClock_ = fp->cameraClock;
+    fp->imageTime = imageTime_ + WallDuration(dt);
+  }
+
   /*
    * gotNewFrame() updates some statistics, but does not yet attempt
    * to align camera time with global frame time.
    */
   double
-  CamSync::Cam::gotNewFrame(unsigned int frameCount,
-                            const WallTime &arrivalTime,
-                            double dtAvg,
-                            int *nframes) {
+  CamSync::Cam::gotNewFrame(const CameraFrame &f,
+                            double dtAvg, int *nframes) {
+    const double dt = (f.arrivalTime - lastArrivalTime_).toSec();
+    
     // Guard against wrap of frame numbers, in a very crude way.
     // At 40 fps, wrap around will occur after about 3 years
     // of continuous running. So in fact, this save-guard has never
     // been tested!
-    if (frameCount == lastFrameCount_) {
+    const unsigned int cameraFrameCount = f.metaData.embeddedFrameCounter;
+    if (cameraFrameCount == lastFrameCount_) {
       ROS_WARN_STREAM("camera " << id_ << " got duplicate frame: "
-                      << frameCount);
+                      << cameraFrameCount);
     }
-    *nframes = (frameCount > lastFrameCount_) ?
-      (frameCount - lastFrameCount_) : 1;
 
-    const double dt = (arrivalTime - lastArrivalTime_).toSec();
+#if USE_FRAME_COUNT_ONLY
+    *nframes = (cameraFrameCount > lastFrameCount_) ?
+      (cameraFrameCount - lastFrameCount_) : 1;
+#else
+    const double dtImg = (f.imageTime - imageTime_).toSec();
+    *nframes = std::max(1, (int)std::round(dtImg/dtAvg));
+#endif
+    imageTime_ = f.imageTime;
 
     frameCount_ += *nframes; // count in even the skipped ones
     
+    lastFrameCount_  = cameraFrameCount;
     if (*nframes != 1) {
-      ROS_WARN_STREAM("camera " << id_ << " dropped frames: " << *nframes - 1);
+      ROS_WARN_STREAM("camera " << id_ << ": dropped frames: " << *nframes-1);
       framesDropped_ += *nframes - 1;
     }
-    lastFrameCount_  = frameCount;
-    lastArrivalTime_ = arrivalTime;
+    lastArrivalTime_ = f.arrivalTime;
     return (dt / *nframes);
   }
   
@@ -230,10 +256,11 @@ namespace cam_sync {
    * gets the new frame first.
    */
   bool
-  CamSync::Cam::updateCameraTime(const WallTime &arrivalTime,
+  CamSync::Cam::updateCameraTime(const CameraFrame &f,
                                  int nframes, double dtAvg,
                                  WallTime *frameTime,
                                  GlobalTime *globalTime) {
+    const WallTime &arrivalTime = f.arrivalTime;
     bool gotValidFrame(true);
     // Unfortunately, the point grey camera timestamps are not all
     // that clean and equally well spaced, so we don't use them.
@@ -293,19 +320,20 @@ namespace cam_sync {
     
     if (debug_) {
       debugFile_ << arrivalTime - STARTUP_TIME  << " "       // 1
-                 << cameraTime_ - STARTUP_TIME << " "        // 2
-                 << *frameTime  - STARTUP_TIME << " "        // 3
-                 << offset_ << " "                           // 4
-                 << dtAvg << " "                             // 5
-                 << nframes                                  // 6
+                 << f.imageTime - STARTUP_TIME  << " "       // 2
+                 << cameraTime_ - STARTUP_TIME << " "        // 3
+                 << *frameTime  - STARTUP_TIME << " "        // 4
+                 << offset_ << " "                           // 5
+                 << dtAvg << " "                             // 6
+                 << nframes                                  // 7
                  << std::endl;
     }
     return (gotValidFrame);
   }
 
-  CamSync::CameraFrame
+  CamSync::CameraFramePtr
   CamSync::FrameQueue::waitForNextFrame(bool *keepRunning) {
-    CameraFrame frame;
+    CameraFramePtr frame;
     std::unique_lock<std::mutex> lock(mutex);
     const std::chrono::microseconds timeout((int64_t)(10000000LL));
     while (ros::ok() && *keepRunning && frames.empty()) {
@@ -329,21 +357,9 @@ namespace cam_sync {
     return (frame);
   }
 
-  void CamSync::FrameQueue::addFrame(const CameraFrame &frame) {
+  void CamSync::FrameQueue::addFrame(const CameraFramePtr &frame) {
     std::unique_lock<std::mutex> lock(mutex);
     frames.push_front(frame);
-    cv.notify_all();
-  }
-
-  void
-  CamSync::FrameQueue::addFrame(int camId, bool ret, const WallTime &tgrab,
-                                const WallTime &arrivalTime,
-                                unsigned int frameCnt,
-                                const ImagePtr &msg,
-                                const FlyCapture2::ImageMetadata &md) {
-    std::unique_lock<std::mutex> lock(mutex);
-    frames.push_front(CameraFrame(camId, ret, tgrab, arrivalTime, frameCnt,
-                                  md, msg));
     cv.notify_all();
   }
 
@@ -410,7 +426,6 @@ namespace cam_sync {
 
   
   void CamSync::configure(Config& config, int level) {
-    ROS_INFO("configuring server!");
     if (level < 0) {
       ROS_INFO("%s: %s", parentNode_.getNamespace().c_str(),
                "Initializing reconfigure server");
@@ -460,30 +475,31 @@ namespace cam_sync {
   void CamSync::framePublishThread(int camIndex) {
     CamPtr curCam = cameras_[camIndex];
     while (ros::ok() && keepPolling_) {
-      CameraFrame frame = curCam->getFrames().waitForNextFrame(&keepPolling_);
-      if (!frame.isValid) {
+      auto frame = curCam->getFrames().waitForNextFrame(&keepPolling_);
+      if (!frame->isValid) {
         continue;
       }
       if (rotateImage_) {
-        curCam->publishMsg(rotate_image(frame.msg), frame.metaData);
+        curCam->publishMsg(rotate_image(frame->msg), frame->metaData);
       } else {
-        curCam->publishMsg(frame.msg, frame.metaData);
+        curCam->publishMsg(frame->msg, frame->metaData);
       }
     }
     ROS_INFO_STREAM("frame publish thread done!");
   }
 
-  bool CamSync::updateTimeStatistics(const CameraFrame &frame,
+  bool CamSync::updateTimeStatistics(const CameraFramePtr &fp,
                                      WallTime *frameTime) {
+    const CameraFrame &frame = *fp;
     bool gotValidFrame(false);
     const auto &cam = cameras_[frame.cameraId];
     if (!cam->timeStatsInitialized()) {
-      cam->initializeTimeStats(frame.cameraFrameCount, frame.arrivalTime);
+      cam->initializeTimeStats(frame);
       return (false);
     }
     int nframes;
-    const double dt = cam->gotNewFrame(frame.cameraFrameCount,
-                                       frame.arrivalTime, dt_, &nframes);
+    cam->updateImageTime(fp);
+    const double dt = cam->gotNewFrame(frame, dt_, &nframes);
     if (!cam->isWarmedUp(frame.arrivalTime)) {
       // During the first few frames the dt from the camera are
       // very noisy, so discount them faster
@@ -515,7 +531,7 @@ namespace cam_sync {
       // reset cameraTime to arrival Time
       cam->setCameraTime(frame.arrivalTime);
     } else {
-      gotValidFrame = cam->updateCameraTime(frame.arrivalTime, nframes,
+      gotValidFrame = cam->updateCameraTime(frame, nframes,
                                             dt_, frameTime, &globalTime_);
     }
     return (gotValidFrame);
@@ -525,14 +541,14 @@ namespace cam_sync {
     std::ofstream tsFile;
     lastLogTime_ = WallTime::now();
     while (ros::ok() && keepPolling_) {
-      CameraFrame frame = cameraFrames_.waitForNextFrame(&keepPolling_);
+      CameraFramePtr frame = cameraFrames_.waitForNextFrame(&keepPolling_);
       if (keepPolling_ && ros::ok()) {
         WallTime frameTime;
         if (updateTimeStatistics(frame, &frameTime)) {
           // got valid frame, dispatch it to respective camera
-          frame.setMessageTimeStamp(frameTime);
+          frame->setMessageTimeStamp(frameTime);
           // move frame to camera thread
-          cameras_[frame.cameraId]->getFrames().addFrame(frame);
+          cameras_[frame->cameraId]->getFrames().addFrame(frame);
         }
         const WallTime t = WallTime::now();
         if (t > lastLogTime_ + logInterval_) {
@@ -562,12 +578,13 @@ namespace cam_sync {
       }
 #endif      
       if (ret) {
-        WallTime arrivalTime = WallTime::now();
+        const WallTime arrTime = WallTime::now();
         const FlyCapture2::ImageMetadata &metaData = pgrImage.GetMetadata();
-        // put the new frame in the queue
-        cameraFrames_.addFrame(camIndex, ret, grabTime, arrivalTime,
-                               metaData.embeddedFrameCounter, image_msg,
-                               metaData);
+        const double imgTime = get_pgr_timestamp(pgrImage);
+        CameraFramePtr fp(new CameraFrame(camIndex, ret, grabTime, arrTime,
+                                          imgTime, metaData, image_msg));
+        cameraFrames_.addFrame(fp);
+
         // update exposure control
         double newShutter(-1.0), newGain(-1.0);
         curCam->getExposureController()->imageCallback(
@@ -575,7 +592,7 @@ namespace cam_sync {
         setShutter(curCam, newShutter);
         setGain(curCam, newGain);
       } else {
-        ROS_WARN_STREAM("frame grab failed for camera " << camIndex);
+        ROS_WARN_STREAM("camera " << camIndex << ": frame grab failed!");
       }
       {
         std::unique_lock<std::mutex> lock(pollMutex_);

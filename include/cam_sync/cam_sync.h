@@ -98,13 +98,14 @@ public:
   struct CameraFrame {
     CameraFrame(int camId = 0, bool iv = false,
                 const WallTime &tgrab = WallTime(0),
-                const WallTime &ta = WallTime(0),
-                unsigned int frameCnt = 0,
+                const WallTime &ta    = WallTime(0),
+                double camClock = 0,
                 const FlyCapture2::ImageMetadata &md =
                 FlyCapture2::ImageMetadata(),
                 const ImagePtr &img_msg = ImagePtr()) :
-      cameraId(camId), isValid(iv), timeGrabStart(tgrab), arrivalTime(ta),
-      cameraFrameCount(frameCnt),
+      cameraId(camId), isValid(iv),
+      grabStartTime(tgrab), arrivalTime(ta),
+      imageTime(ta), cameraClock(camClock),
       metaData(md), msg(img_msg) {
       arrivalTime = ta;
     }
@@ -118,26 +119,25 @@ public:
     bool          isValid{false};
     bool          isPublished{false};
     WallTime      releaseTime;
-    WallTime      timeGrabStart;
+    WallTime      grabStartTime;
     WallTime      arrivalTime;
-    unsigned int  cameraFrameCount;
+    WallTime      imageTime;
+    double        cameraClock;
     FlyCapture2::ImageMetadata metaData;
     ImagePtr      msg;
   };
 
+  typedef std::shared_ptr<CameraFrame> CameraFramePtr;
+
   struct FrameQueue {
     FrameQueue(int ida=0) : id(ida) {};
-    void         addFrame(const CameraFrame &f);
-    void         addFrame(int camId, bool ret, const WallTime &ts,
-                          const WallTime &arrivalTime,
-                          unsigned int frameCnt,
-                          const ImagePtr &msg,
-                          const FlyCapture2::ImageMetadata &md);
-    CameraFrame  waitForNextFrame(bool *keepRunning);
+    void            addFrame(const CameraFramePtr &f);
+    CameraFramePtr  waitForNextFrame(bool *keepRunning);
+    // 
     int         id;
     std::mutex  mutex;
     std::condition_variable  cv;
-    std::deque<CameraFrame> frames;
+    std::deque<CameraFramePtr> frames;
     bool        hasQueueBuildup{false};
   };
 
@@ -153,23 +153,12 @@ public:
     inline bool timeStatsInitialized() const {
       return (lastArrivalTime_ != WallTime(0) && fps_ > 0);
     }
-    void setCameraTime(const WallTime &t) { cameraTime_ = t; }
-    void initializeTimeStats(unsigned int frameCount,
-                             const WallTime &t);
-    double  gotNewFrame(unsigned int frameCount,
-                        const WallTime &arrivalTime,
-                        double dtA,
-                        int *nframes);
-    bool    updateCameraTime(const WallTime &arrivalTime,
-                             int nframes, double dtAvg,
-                             WallTime *frameTime,
-                             GlobalTime *globalTime);
-
-    double        updateCameraTime(unsigned int frameCount,
-                                   const WallTime &arrivalTime,
-                                   double dtAvg, WallTime *frameTime,
-                                   GlobalTime *globalTime,
-                                   bool *gotValidFrame);
+    void    setCameraTime(const WallTime &t) { cameraTime_ = t; }
+    void    initializeTimeStats(const CameraFrame &f);
+    void    updateImageTime(const CameraFramePtr &fp);
+    double  gotNewFrame(const CameraFrame &f, double dtA, int *nframes);
+    bool    updateCameraTime(const CameraFrame &f, int nframes, double dtAvg,
+                             WallTime *frameTime,  GlobalTime *globalTime);
     void          setFPS(double f);
     void          publishMsg(const ImagePtr &imgMsg,
                              const FlyCapture2::ImageMetadata &md);
@@ -190,6 +179,8 @@ public:
     WallTime      cameraTime_{WallTime(0)};
     WallTime      firstArrivalTime_{WallTime(0)};
     WallTime      lastFrameTime_{0};
+    WallTime      imageTime_{WallTime(0)};
+    double        lastCameraClock_{0};
     double        offset_{0};
     unsigned int  frameCount_{0};
     unsigned int  framesDropped_{0};
@@ -208,7 +199,7 @@ private:
   void frameGrabThread(int camIndex);
   void framePublishThread(int camIndex);
   void setFPS(double fps);
-  bool updateTimeStatistics(const CameraFrame &frame, WallTime *frameTime);
+  bool updateTimeStatistics(const CameraFramePtr &frame, WallTime *frameTime);
 
   // Variables for the camera state
   ros::NodeHandle          parentNode_;
