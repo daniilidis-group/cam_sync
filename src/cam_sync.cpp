@@ -20,6 +20,7 @@
 #include <boost/range/irange.hpp>
 #include <iomanip>
 #include <algorithm>
+#include <exception>
 
 
 //#define SIMULATE_FRAME_DROPS
@@ -387,11 +388,19 @@ namespace cam_sync {
     pn.param<int>("lag_threshold", lagThresh, 10);
     double atctc;
     pn.param<double>("arrival_to_camera_time_coeff", atctc, 0.005);
-
+    std::string calibDir;
+    pn.param<std::string>("calib_dir", calibDir, "camera_info");
     dt_    = 1.0 / fps;  // starting estimate for average
     dtVar_ = dtVarThreshold_ * 5.0;
     for (int i = 0; i < numCameras_; i++) {
       std::string camName = "cam" + std::to_string(i);
+      std::string calibfn = camName + ".yaml";
+      pn.param<std::string>(camName + "/calib_file_name", calibfn, camName);
+      if (!pn.hasParam(camName + "/camera_name")) {
+        ROS_ERROR_STREAM("parameters missing for " << camName);
+        throw (std::runtime_error("no param found for " + camName));
+      }
+      pn.setParam(camName + "/calib_url", calibDir + "/" + calibfn);
       CamPtr camTmp = boost::make_shared<Cam>(nh_, i, lagThresh, atctc,
                                               debugTimeStamps_, camName);
       cameras_.push_back(move(camTmp));

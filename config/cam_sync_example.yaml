@@ -1,0 +1,125 @@
+#
+# cam sync configuration
+#
+#
+
+cam0:
+  identifier: "17408094"
+  camera_name: "pg_17408094"
+  calib_file_name: 17408094.yaml
+  white_balance:
+    blue: 721
+    red:  678
+  exposure_control:
+    enabled: true
+    brightness: 128
+    brightness_tol: 10
+    top_margin: 50
+    max_free_fps: 41
+    max_shutter: 10
+    wait_frames: 60
+cam1:
+  identifier: "18025945"
+  camera_name: pg_18025945
+  calib_file_name: 18025945.yaml
+  white_balance:
+    blue: 709
+    red:  685
+  exposure_control:
+    enabled: true
+    brightness: 128
+    brightness_tol: 10
+    top_margin: 50
+    max_free_fps: 41
+    max_shutter: 10
+    wait_frames: 60
+cam2:
+  identifier: "17408093"
+  camera_name: pg_17408093
+  calib_file_name: 17408093.yaml
+  white_balance:
+    blue: 730
+    red:  681
+  exposure_control:
+    enabled: true
+    brightness: 128
+    brightness_tol: 10
+    top_margin: 50
+    max_free_fps: 41
+    max_shutter: 10
+    wait_frames: 60
+cam3:
+  identifier: "18057299"
+  camera_name: pg_18057299
+  calib_file_name: 18057299.yaml
+  white_balance:
+    blue: 707
+    red:  685
+  exposure_control:
+    enabled: true
+    brightness: 128
+    brightness_tol: 10
+    top_margin: 50
+    max_free_fps: 41
+    max_shutter: 10
+    wait_frames: 60
+cam4:
+  identifier: "18025950"
+  camera_name: pg_18025950
+  calib_file_name: 18025950.yaml
+  white_balance:
+    blue: 705
+    red:  695
+  exposure_control:
+    enabled: true
+    brightness: 128
+    brightness_tol: 10
+    top_margin: 50
+    max_free_fps: 41
+    max_shutter: 10
+    wait_frames: 60
+cam5:
+  identifier: "18057298"
+  camera_name: pg_18057298
+  calib_file_name: 18057298.yaml
+  white_balance:
+    blue: 703
+    red:  687
+  exposure_control:
+    enabled: true
+    brightness: 128
+    brightness_tol: 10
+    top_margin: 50
+    max_free_fps: 41
+    max_shutter: 10
+    wait_frames: 60
+cam6:
+  identifier: "18057304"
+  camera_name: pg_18057304
+  calib_file_name: 18057304.yaml
+  white_balance:
+    blue: 702
+    red:  679
+  exposure_control:
+    enabled: true
+    brightness: 128
+    brightness_tol: 10
+    top_margin: 50
+    max_free_fps: 41
+    max_shutter: 10
+    wait_frames: 60
+cam7:
+  identifier: "18057303"
+  camera_name: pg_18057303
+  calib_file_name: 18057303.yaml
+  white_balance:
+    blue: 705
+    red:  694
+  exposure_control:
+    enabled: true
+    brightness: 128
+    brightness_tol: 10
+    top_margin: 50
+    max_free_fps: 41
+    max_shutter: 10
+    wait_frames: 60
