@@ -202,7 +202,7 @@ private:
   bool updateTimeStatistics(const CameraFramePtr &frame, WallTime *frameTime);
 
   // Variables for the camera state
-  ros::NodeHandle          parentNode_;
+  ros::NodeHandle          nh_;
   int                      numCameras_;
   bool                     rotateImage_{false};
   int                      masterCamIdx_{0};

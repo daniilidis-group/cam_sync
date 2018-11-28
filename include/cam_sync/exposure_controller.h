@@ -1,4 +1,4 @@
-/*
+/* -*-c++-*--------------------------------------------------------------------
  * 2016 Bernd Pfrommer
  *
  * Licensed under the Apache License, Version 2.0 (the "License");

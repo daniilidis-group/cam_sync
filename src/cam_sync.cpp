@@ -364,8 +364,8 @@ namespace cam_sync {
   }
 
   CamSync::CamSync(const ros::NodeHandle& pn)
-    : parentNode_(pn) {
-    configServer_.reset(new dynamic_reconfigure::Server<Config>(parentNode_));
+    : nh_(pn) {
+    configServer_.reset(new dynamic_reconfigure::Server<Config>(nh_));
     
     pn.getParam("num_cameras", numCameras_);
     pn.param<int>("master_camera_index", masterCamIdx_, 0);
@@ -392,7 +392,7 @@ namespace cam_sync {
     dtVar_ = dtVarThreshold_ * 5.0;
     for (int i = 0; i < numCameras_; i++) {
       std::string camName = "cam" + std::to_string(i);
-      CamPtr camTmp = boost::make_shared<Cam>(parentNode_, i, lagThresh, atctc,
+      CamPtr camTmp = boost::make_shared<Cam>(nh_, i, lagThresh, atctc,
                                               debugTimeStamps_, camName);
       cameras_.push_back(move(camTmp));
     }
@@ -410,9 +410,9 @@ namespace cam_sync {
 
   void CamSync::start() {
     double duration(60);  // in seconds
-    parentNode_.getParam("rec_length", duration);
+    nh_.getParam("rec_length", duration);
 
-    timer_ = parentNode_.createTimer(ros::Duration(duration),
+    timer_ = nh_.createTimer(ros::Duration(duration),
                                      boost::bind(&CamSync::timerCallback,
                                                  this, _1), /*oneshot*/ true);
     startPoll();
@@ -427,7 +427,7 @@ namespace cam_sync {
   
   void CamSync::configure(Config& config, int level) {
     if (level < 0) {
-      ROS_INFO("%s: %s", parentNode_.getNamespace().c_str(),
+      ROS_INFO("%s: %s", nh_.getNamespace().c_str(),
                "Initializing reconfigure server");
     }
     config_ = config;
@@ -607,53 +607,31 @@ namespace cam_sync {
                 masterCamIdx_, cameras_.size());
       return;
     }
-    //  save trigger source before overwriting
-    int trigger_source = config.trigger_source;
 
-    // first set the master!
-    config.fps             = fps_;
-    if (masterCamIdx_ >= 0) {
-      config.trigger_source  = -1; // free running
-      //config.enable_output_voltage = 1; // for blackfly master
-      config.exposure        = false;
-      config.auto_shutter    = false;
-      config.auto_gain       = false;
-
-      CamConfig cc(config);
-      auto masterCam = cameras_[masterCamIdx_];
-      masterCam->Stop();
-      masterCam->camera().Configure(cc);
-      auto &controller = *masterCam->getExposureController();
+    for (int i = 0; i < numCameras_; i++) {
+      CamPtr cam = cameras_[i];
+      CamConfig cc(config); // deep copy
+      const std::string prefix("cam" + std::to_string(i) + "/white_balance");
+      nh_.param<int>(prefix + "/red",  cc.wb_red,  cc.wb_red);
+      nh_.param<int>(prefix + "/blue", cc.wb_blue, cc.wb_blue);
+      if (i == masterCamIdx_) {
+        cc.trigger_source = -1; // free running
+        cc.enable_output_voltage = 0; // once used for blackfly
+      } else {
+        cc.fps = fps_ * 1.5; // not sure that makes any difference...
+        cc.enable_output_voltage = 0; // not needed for slaves
+        cc.strobe_control = -1;  // no strobe control for slave
+        cc.trigger_mode   = 14;  // overlapped processing
+      }
+      cam->Stop();
+      cam->camera().Configure(cc);
+      cam->camera().SetEnableTimeStamps(true);
+      auto &controller = *cam->getExposureController();
       controller.setFPS(config_.fps, config_.max_free_fps);
       controller.setCurrentShutter(cc.shutter_ms);
       controller.setCurrentGain(cc.gain_db);
-      masterCam->setFPS(fps_);
-      masterCam->camera().StartCapture();
-      masterCam->camera().SetEnableTimeStamps(true);
-    }
-    
-    // Switch on trigger for slave
-    config.fps              = fps_ * 1.5;  // max frame rate!
-    config.trigger_source   = trigger_source; // restore
-    config.enable_output_voltage = 0; // not needed for slaves
-
-    config.strobe_control   = -1;  // no strobe control for slave
-    config.trigger_mode     = 14;  // overlapped processing
-
-    for (int i = 0; i < numCameras_; ++i) {
-      if (i != masterCamIdx_) {
-        CamConfig cc2(config);
-        CamPtr curCam = cameras_[i];
-        curCam->Stop();
-        curCam->camera().Configure(cc2);
-        curCam->camera().SetEnableTimeStamps(true);
-        auto &controller = *curCam->getExposureController();
-        controller.setFPS(config_.fps, config_.max_free_fps);
-        controller.setCurrentShutter(cc2.shutter_ms);
-        controller.setCurrentGain(cc2.gain_db);
-        curCam->setFPS(fps_);
-        curCam->camera().StartCapture();
-      }
+      cam->setFPS(fps_);
+      cam->camera().StartCapture();
     }
   }
 

@@ -16,6 +16,7 @@
   
   <arg name="autoexp_enabled"  default="false"/>
   <arg name="exposure_control_file"  default="INVALID_FILE.yaml"/>
+  <arg name="white_balance_file" default=""/>
   <arg name="brightness_tol"  default="10.0"/>
   <arg name="brightness_cam0"  default="120.0"/>
   <arg name="brightness_cam1"  default="120.0"/>
@@ -39,14 +40,15 @@
   <arg name="cam7" default="17041943"/>
 
   <arg name="duration" default="30000" /> <!-- after this time the sync will exit! -->
-  <arg name="num_cameras" default="4" />
-  <arg name="calib_dir" default="NO_CALIB_DIR_PROVIDED" />
+  <arg name="num_cameras" default="4"/>
+  <arg name="calib_dir" default="NO_CALIB_DIR_PROVIDED"/>
 
   <!-- Broadcast camera image for specified amount of time. -->
   #	launch-prefix="gdb -ex run --args"
   <node pkg="cam_sync" type="cam_sync_node" name="cam_sync"
 	required="true" output="$(arg output)">
     <rosparam command="load" file="$(arg exposure_control_file)" if="$(arg autoexp_enabled)"/>
+    <rosparam command="load" file="$(arg white_balance_file)" unless="$(eval white_balance_file == '')"/>
     <param name="rotate_image" type="bool" value="$(arg rotate_image)"/>
     <param name="debug_timestamps"  type="bool" value="$(arg debug_timestamps)"/>
     <param name="dt_avg_time"  type="double" value="$(arg dt_avg_time)"/>
