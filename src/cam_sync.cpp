@@ -587,11 +587,14 @@ namespace cam_sync {
       }
 #endif      
       if (ret) {
-        const WallTime arrTime = WallTime::now();
-        const FlyCapture2::ImageMetadata &metaData = pgrImage.GetMetadata();
+        // adjust arrival time for delay due to different shutters!
+        const FlyCapture2::ImageMetadata &md = pgrImage.GetMetadata();
+        const WallTime arrTime = WallTime::now()
+          - WallDuration((md.embeddedShutter & 0x00000FFF) *
+                         curCam->getShutterRatio());
         const double imgTime = get_pgr_timestamp(pgrImage);
         CameraFramePtr fp(new CameraFrame(camIndex, ret, grabTime, arrTime,
-                                          imgTime, metaData, image_msg));
+                                          imgTime, md, image_msg));
         cameraFrames_.addFrame(fp);
 
         // update exposure control
