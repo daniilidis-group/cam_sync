@@ -165,7 +165,7 @@ public:
     ControllerPtr getExposureController() { return (exposureController_); }
     void          logStats(double dt);
     bool          isWarmedUp(const WallTime &t) const;
-
+    float         getShutterRatio() const { return (shutterRatio_); }
   private:
     // ------------------ variables
     int           id_{0};
