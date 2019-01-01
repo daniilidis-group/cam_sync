@@ -96,8 +96,18 @@ namespace cam_sync {
     Flea3Ros(pnh, prefix), id_(i), frames_(i),
     lagThreshold_(lagThresh), arrivalToCameraTimeCoeff_(att), debug_(debug) {
     exposureController_.reset(new ExposureController(pnh, prefix));
+    // metadata is in useless relative numbers, need to convert to
+    // absolute
     shutterRatio_    = camera().GetAbsToRelativeRatio(0x918, 0x81c);
-    gainRatio_       = camera().GetAbsToRelativeRatio(0x928, 0x820);
+    // for the gain, we have to set it to something > 0 to compute a ratio!
+    bool autoGain(false);  double gain(1.0);
+    camera().SetGain(autoGain, gain);
+    // now find the gain ratio
+    gainRatio_ = camera().GetAbsToRelativeRatio(0x928, 0x820);
+    if (gainRatio_ < 0) {
+      gainRatio_ = 0.1; // fallback to some reasonable value
+      ROS_WARN_STREAM("cam" << i << " cannot find gain ratio!");
+    }
     if (debug_) {
       debugFile_.open("cam_" + std::to_string(i) + ".txt");
     }
