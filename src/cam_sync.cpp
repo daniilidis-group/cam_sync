@@ -521,7 +521,7 @@ namespace cam_sync {
     const double dt = cam->gotNewFrame(frame, dt_, &nframes);
     if (!cam->isWarmedUp(frame.arrivalTime)) {
       // During the first few frames the dt from the camera are
-      // very noisy, so discount them faster
+      // very noisy, so ignore them
       return (false);
     }
     
