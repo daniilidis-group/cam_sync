@@ -1,0 +1,92 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%2345678901234567890123456789012345678901234567890123456789012345678901234567890
+%        1         2         3         4         5         6         7         8
+\pdfoutput=1
+\documentclass[letterpaper, 10 pt, conference]{ieeeconf}  % Comment this line out
+                                                          % if you need a4paper
+\IEEEoverridecommandlockouts                              % This command is only
+                                                          % needed if you want to
+                                                          % use the \thanks command
+\overrideIEEEmargins
+% See the \addtolength command later in the file to balance the column lengths
+% on the last page of the document
+
+
+
+% The following packages can be found on http:\\www.ctan.org
+\usepackage{graphicx} % for pdf, bitmapped graphics files
+\usepackage{multicol}
+\usepackage{tensor}
+\usepackage{amsmath} % assumes amsmath package installed
+\usepackage{amssymb}  % assumes amsmath package installe
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{balance}
+\usepackage{bm}
+%\setlength{\belowcaptionskip}{-10pt}
+\usepackage[detect-all]{siunitx}
+\usepackage{booktabs}
+
+\newcommand{\mv}[1]{\bm{#1}}
+\newcommand{\ctrans}[3]{\tensor*[^{\mathrm{#1}}]{\mv{#2}}{_{\mathrm{#3}}}}
+\newcommand{\ctransf}[4]{\tensor*[^{\mathrm{#1}}]{\mv{#2}}{_{\mathrm{#3}}^{\mathrm{(#4)}}}}
+\newcommand{\sigrot}{\sigma_{\mathrm{r}}}
+\newcommand{\sigtrans}{\sigma_{\mathrm{t}}}
+\newcommand{\rset}{\mathcal{R}}
+\newcommand{\oset}{\mathcal{O}}
+\newcommand{\bset}{\mathcal{B}}
+\newcommand{\uset}{\mathcal{U}}
+\newcommand{\dset}{\mathcal{D}}
+\newcommand{\cset}{\mathcal{C}}
+\newcommand{\fset}{\mathcal{F}}
+\newcommand{\eset}{\mathcal{E}}
+\newcommand{\etime}[1]{\tensor*[^{\mathrm{(i)}}]{e}{_{#1}}}
+\newcommand{\ejtime}[1]{\tensor*[^{\mathrm{(j)}}]{e}{_{#1}}}
+\newcommand{\eztime}[1]{\tensor*[^{\mathrm{(0)}}]{e}{_{#1}}}
+\newcommand{\atime}[1]{\tensor*[^{\mathrm{(i)}}]{a}{_{#1}}}
+\newcommand{\ttime}[1]{\tensor*[^{\mathrm{(i)}}]{t}{_{#1}}}
+\newcommand{\dt}{\Delta T}
+\newcommand{\dtn}[1]{\Delta T_{#1}}
+\newcommand{\dta}[1]{\tensor*[^{\mathrm{(i)}}]{\Delta a}{_{#1}}}
+\newcommand{\dtaz}{\tensor*[^{\mathrm{(0)}}]{\Delta a}{}}
+\DeclareMathOperator*{\argmax}{argmax}
+
+\title{\LARGE \bf
+CamSync: Synchronized Image Recording Under Large Jitter}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
+
+\begin{abstract}
+Having multiple views of an object available is highly beneficial
+when attempting to recover its 3D structure. If either the cameras or
+the object undergo rapid motion it is necessary to synchronize the
+camera shutters such that all images refer to the same point in time.
+But even with hardware synchronized shutters there remains the
+task of assigning the images to the corresponding synchronization
+pulse as they arrive at the recording computer. This becomes
+particularly difficult when high CPU load or camera link utilization
+result in strongly fluctuating latencies, and simply grouping
+frames by arrival time fails.
+The present work describes how to utilize arrival times and embedded
+image camera time stamps to reliably associate frames with sync
+pulses. This scheme is implemented in CamSync, a ROS node freely available at
+\href{https://github.com/daniilidis-group/cam_sync}{https://github.com/daniilidis-group/cam\_sync}.
+\end{abstract}
+\input{sections/intro.tex}
+\input{sections/hardware_setup.tex}
+\input{sections/synchronization_algorithm.tex}
+\input{sections/auto_exposure.tex}
+\input{sections/multithreading.tex}
+\input{sections/conclusion.tex}
+
+\bibliographystyle{IEEEtran}
+\bibliography{camsync}
+
+%\balance
+
+
+\end{document}
