@@ -1,0 +1,50 @@
+\section{Auto exposure}
+\newcommand{\Bdes}{B_{\mathrm{des}}}
+\newcommand{\Bcurr}{B_{\mathrm{curr}}}
+\newcommand{\Bthresh}{B_{\mathrm{thresh}}}
+\newcommand{\Scurr}{S_{\mathrm{curr}}}
+\newcommand{\Smax}{S_{\mathrm{max}}}
+\newcommand{\Gmax}{G_{\mathrm{max}}}
+\newcommand{\Gcurr}{G_{\mathrm{curr}}}
+
+\label{sec:auto_exposure}
+The FLIR/PointGrey computer vision cameras used for our experiments
+have a built-in auto exposure algorithm. However, auto exposure mode
+is incompatible with hardware based shutter triggering, requiring
+the implementation of an external software based exposure control.
+
+For completeness, we describe the simple exposure control scheme
+\cite{Liang2007} that 
+is implemented in CamSync. The control algorithm adjusts both the
+shutter time $S$ and the gain $G$. Gain is only used when the target
+brightness cannot be reached by increasing the shutter time.
+
+When a frame is received for camera $i$, the intensity values of the
+pixels at every 32nd row and every 32nd  column of the image (in raw
+Bayer format) are averaged. At 1920x1200 resolution, this equates to
+2250 pixels that are sampled, and takes a negligible amount of CPU
+time. The so computed image brightness $B$ is in the range of 0 to
+255. If $B$ deviates by more than $\Bthresh$ (typically set to 10) from the
+brightness target $\Bdes$ (typically about 90), then either shutter or
+gain settings are updated.
+
+Let $\Scurr$ denote the currently effective shutter time.
+If $\Scurr$ is less than the configured maximum
+shutter time $\Smax$ then the new commanded shutter speed is:
+\begin{equation}
+ S = \mathrm{min}(\Scurr \frac{\Bdes}{\Bcurr},\Smax)\ .
+\end{equation}
+
+If $\Scurr = \Smax$, gain control is used to reach the desired
+brightness:
+\begin{equation}
+ G = \mathrm{min}(\Gcurr + 10 \log_{10}(\Bdes/\Bcurr),\Gmax)\ .
+\end{equation}
+Note that here the gain is expressed in decibels (db).
+
+The commands to update gain or shutter speed are sent immediately
+after the frame has been processed. However a few frames will elapse
+until the driver's commands reach the camera. For
+this reason the CamSync implementation will wait for a configurable
+number of frames before it begins to evaluate the image brightness
+again.
