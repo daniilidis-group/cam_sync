@@ -33,7 +33,9 @@ namespace cam_sync {
   }
 
   double ExposureController::calculateGain(double brightRatio) const {
-    const double kp = 5.0;  // empirical
+    // because gain is in db:
+    // db(G) = 10 * log_10(G) = 10 * ln(G) / ln(10) = 4.34 * ln(G)
+    const double kp = 4.34;
     double desiredGain = currentGain_ + kp * log(brightRatio);
     return (std::max(std::min(desiredGain, config_.max_gain), config_.min_gain));
   }
