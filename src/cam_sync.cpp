@@ -142,8 +142,12 @@ namespace cam_sync {
     variance_             = 0;
   }
 
-  void CamSync::Cam::setFPS(double f) {
+  void CamSync::Cam::setFPS(double f, double freqTol,
+                            double minDelay, double maxDelay, double window) {
     fps_ = f;
+    SetTopicDiagnosticParameters(fps_ * (1.0 - freqTol),
+                                 fps_ * (1.0 + freqTol),
+                                 window, minDelay/f, maxDelay/f);
   }
   
   bool
@@ -633,9 +637,15 @@ namespace cam_sync {
     for (int i = 0; i < numCameras_; i++) {
       CamPtr cam = cameras_[i];
       CamConfig cc(config); // deep copy
+      double freqTol, minDelay, maxDelay, window;
       const std::string prefix("cam" + std::to_string(i) + "/white_balance");
       nh_.param<int>(prefix + "/red",  cc.wb_red,  cc.wb_red);
       nh_.param<int>(prefix + "/blue", cc.wb_blue, cc.wb_blue);
+      const std::string diag("cam" + std::to_string(i) + "/diagnostics");
+      nh_.param<double>(diag + "/frequency_tolerance", freqTol, 0.02);
+      nh_.param<double>(diag + "/min_delay", minDelay, -1.0);
+      nh_.param<double>(diag + "/max_delay", maxDelay,  2.0);
+      nh_.param<double>(diag + "/window",  window,  10.0);
       if (i == masterCamIdx_) {
         cc.trigger_source = -1; // free running
         cc.enable_output_voltage = 0; // once used for blackfly
@@ -652,7 +662,7 @@ namespace cam_sync {
       controller.setFPS(config_.fps, config_.max_free_fps);
       controller.setCurrentShutter(cc.shutter_ms);
       controller.setCurrentGain(cc.gain_db);
-      cam->setFPS(fps_);
+      cam->setFPS(fps_, freqTol, minDelay, maxDelay, window);
       cam->camera().StartCapture();
     }
   }
