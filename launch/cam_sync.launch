@@ -13,6 +13,7 @@
   <arg name="wb_blue"  default="691"/>
   <arg name="strobe_control"  default="1"/>
   <arg name="trigger_source"  default="0"/>
+  <arg name="trigger_polarity"  default="0"/>
   <arg name="master_camera_index"  default="-1"/>
   <arg name="debug_timestamps"  default="false"/>
   <arg name="dt_avg_time"  default="10.0"/>
@@ -52,6 +53,7 @@
     <param name="white_balance"  type="bool" value="true"/>
     <param name="strobe_control" type="int" value="$(arg strobe_control)"/>
     <param name="trigger_source" type="int" value="$(arg trigger_source)"/>
+    <param name="trigger_polarity" type="int" value="$(arg trigger_polarity)"/>
     <param name="wb_red"  type="int" value="$(arg wb_red)"/>
     <param name="wb_blue" type="int" value="$(arg wb_blue)"/>
     <param name="shutter_ms" type="double" value="$(arg shutter_ms)"/>

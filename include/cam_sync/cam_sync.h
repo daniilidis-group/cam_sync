@@ -159,13 +159,14 @@ public:
     double  gotNewFrame(const CameraFrame &f, double dtA, int *nframes);
     bool    updateCameraTime(const CameraFrame &f, int nframes, double dtAvg,
                              WallTime *frameTime,  GlobalTime *globalTime);
-    void          setFPS(double f);
+    void    setFPS(double f, double freqTol,
+                   double minDelay, double maxDelay, double window);
     void          publishMsg(const ImagePtr &imgMsg,
                              const FlyCapture2::ImageMetadata &md);
     ControllerPtr getExposureController() { return (exposureController_); }
     void          logStats(double dt);
     bool          isWarmedUp(const WallTime &t) const;
-
+    float         getShutterRatio() const { return (shutterRatio_); }
   private:
     // ------------------ variables
     int           id_{0};

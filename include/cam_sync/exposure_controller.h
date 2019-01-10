@@ -54,9 +54,12 @@ namespace cam_sync {
     double                    currentShutter_{-1}; // in msec
     double                    currentGain_{-1};    // in db
     double                    normFac_{0};
-    double                    maxShutterLim_{100}; // in msec, limit due to frame rate
+    // maxShutterLim_ is in msec: the limit due to frame rate
+    double                    maxShutterLim_{100};
     int                       firstRow_{-1};
     int                       lastRow_{-1};
+    double                    brightnessAvgConst_{0.025};
+    double                    b_{0}; // time-averaged brightness
     ros::Publisher            metaDataPub_;
     std::shared_ptr<dynamic_reconfigure::Server<ExposureControlDynConfig> >    configServer_;
   };

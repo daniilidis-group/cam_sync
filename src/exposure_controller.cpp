@@ -1,5 +1,5 @@
 /* -*-c++-*--------------------------------------------------------------------
- * 2017 Bernd Pfrommer
+ * 2018 Bernd Pfrommer
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,9 @@ namespace cam_sync {
   }
 
   double ExposureController::calculateGain(double brightRatio) const {
-    const double kp = 5.0;  // empirical
+    // because gain is in db:
+    // db(G) = 10 * log_10(G) = 10 * ln(G) / ln(10) = 4.34 * ln(G)
+    const double kp = 4.34;
     double desiredGain = currentGain_ + kp * log(brightRatio);
     return (std::max(std::min(desiredGain, config_.max_gain), config_.min_gain));
   }
@@ -74,7 +76,8 @@ namespace cam_sync {
         // We are in shutter control mode
         //
         double maxShutter = getMaxShutter();
-        if (currentShutter_ >= maxShutter && err_b > 0 && config_.max_gain > config_.min_gain) {
+        if (currentShutter_ >= maxShutter && err_b > 0 &&
+            config_.max_gain > config_.min_gain) {
           // Already have shutter at maximum, but still not bright enough,
           // must  switch to gain control mode.
           currentGain_ = calculateGain(brightRatio);
@@ -104,7 +107,11 @@ namespace cam_sync {
     }
     hasChanged = *newGain != -1 || *newShutter != -1;
     if (hasChanged) {
-      numFramesSkip_ = config_.wait_frames;
+      // must wait until either the time- averaged image, or
+      // at the very least the camera had time to respond to the shutter
+      // change.
+      numFramesSkip_ = std::max(config_.wait_frames,
+                                (int)(2.0 / brightnessAvgConst_));
     }
     return (hasChanged);
   }
@@ -114,13 +121,17 @@ namespace cam_sync {
     *newShutter = -1;
     *newGain = -1;
     if (config_.enabled && currentShutter_ >= 0 && currentGain_ >= 0) {
-      double b = std::max(getAverageBrightness(&img->data[0], img->height,
+      // gets the image-averaged, but instantaneous brightness: bi
+      double bi = std::max(getAverageBrightness(&img->data[0], img->height,
                                                img->width, img->step), 1.0);
+      // now time average
+      b_ = b_ * (1.0 - brightnessAvgConst_) + brightnessAvgConst_ * bi;
       double oldShutter = currentShutter_;
       double oldGain    = currentGain_;
-      if (updateExposure(b, newShutter, newGain)) {
-         ROS_INFO("%s bright: %7.2f at shut/gain: [%5.2f %5.3f] new: [%5.2f %5.3f]",
-                  name_.c_str(), b, oldShutter, oldGain, currentShutter_, currentGain_);
+      if (updateExposure(b_, newShutter, newGain)) {
+         ROS_INFO("%s bright: %7.2f at shut/gain: [%5.2f %5.3f] "
+                  "new: [%5.2f %5.3f]", name_.c_str(), b_, oldShutter,
+                  oldGain, currentShutter_, currentGain_);
       }
     }
   }
@@ -183,9 +194,16 @@ namespace cam_sync {
       ROS_INFO("updating FPS shutter limit to %.2fms", maxShutter);
     }
     maxShutterLim_ = maxShutter;
+  
+    // now determine the averaging constant from the fps
+
+    brightnessAvgConst_ = 1.0/(config_.brightness_avg_time * fps);
+    
   }
 
-  void ExposureController::configure(ExposureControlDynConfig& config, int level) {
+  void ExposureController::configure(ExposureControlDynConfig& config,
+                                     int level) {
     config_ = config;
+    b_ = config.brightness; // initialize with target brightness
   }
 }

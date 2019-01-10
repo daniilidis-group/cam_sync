@@ -96,8 +96,18 @@ namespace cam_sync {
     Flea3Ros(pnh, prefix), id_(i), frames_(i),
     lagThreshold_(lagThresh), arrivalToCameraTimeCoeff_(att), debug_(debug) {
     exposureController_.reset(new ExposureController(pnh, prefix));
+    // metadata is in useless relative numbers, need to convert to
+    // absolute
     shutterRatio_    = camera().GetAbsToRelativeRatio(0x918, 0x81c);
-    gainRatio_       = camera().GetAbsToRelativeRatio(0x928, 0x820);
+    // for the gain, we have to set it to something > 0 to compute a ratio!
+    bool autoGain(false);  double gain(1.0);
+    camera().SetGain(autoGain, gain);
+    // now find the gain ratio
+    gainRatio_ = camera().GetAbsToRelativeRatio(0x928, 0x820);
+    if (gainRatio_ < 0) {
+      gainRatio_ = 0.1; // fallback to some reasonable value
+      ROS_WARN_STREAM("cam" << i << " cannot find gain ratio!");
+    }
     if (debug_) {
       debugFile_.open("cam_" + std::to_string(i) + ".txt");
     }
@@ -132,8 +142,12 @@ namespace cam_sync {
     variance_             = 0;
   }
 
-  void CamSync::Cam::setFPS(double f) {
+  void CamSync::Cam::setFPS(double f, double freqTol,
+                            double minDelay, double maxDelay, double window) {
     fps_ = f;
+    SetTopicDiagnosticParameters(fps_ * (1.0 - freqTol),
+                                 fps_ * (1.0 + freqTol),
+                                 window, minDelay/f, maxDelay/f);
   }
   
   bool
@@ -511,7 +525,7 @@ namespace cam_sync {
     const double dt = cam->gotNewFrame(frame, dt_, &nframes);
     if (!cam->isWarmedUp(frame.arrivalTime)) {
       // During the first few frames the dt from the camera are
-      // very noisy, so discount them faster
+      // very noisy, so ignore them
       return (false);
     }
     
@@ -587,11 +601,14 @@ namespace cam_sync {
       }
 #endif      
       if (ret) {
-        const WallTime arrTime = WallTime::now();
-        const FlyCapture2::ImageMetadata &metaData = pgrImage.GetMetadata();
+        // adjust arrival time for delay due to different shutters!
+        const FlyCapture2::ImageMetadata &md = pgrImage.GetMetadata();
+        const WallTime arrTime = WallTime::now()
+          - WallDuration((md.embeddedShutter & 0x00000FFF) *
+                         curCam->getShutterRatio());
         const double imgTime = get_pgr_timestamp(pgrImage);
         CameraFramePtr fp(new CameraFrame(camIndex, ret, grabTime, arrTime,
-                                          imgTime, metaData, image_msg));
+                                          imgTime, md, image_msg));
         cameraFrames_.addFrame(fp);
 
         // update exposure control
@@ -620,9 +637,15 @@ namespace cam_sync {
     for (int i = 0; i < numCameras_; i++) {
       CamPtr cam = cameras_[i];
       CamConfig cc(config); // deep copy
+      double freqTol, minDelay, maxDelay, window;
       const std::string prefix("cam" + std::to_string(i) + "/white_balance");
       nh_.param<int>(prefix + "/red",  cc.wb_red,  cc.wb_red);
       nh_.param<int>(prefix + "/blue", cc.wb_blue, cc.wb_blue);
+      const std::string diag("cam" + std::to_string(i) + "/diagnostics");
+      nh_.param<double>(diag + "/frequency_tolerance", freqTol, 0.02);
+      nh_.param<double>(diag + "/min_delay", minDelay, -1.0);
+      nh_.param<double>(diag + "/max_delay", maxDelay,  2.0);
+      nh_.param<double>(diag + "/window",  window,  10.0);
       if (i == masterCamIdx_) {
         cc.trigger_source = -1; // free running
         cc.enable_output_voltage = 0; // once used for blackfly
@@ -639,7 +662,7 @@ namespace cam_sync {
       controller.setFPS(config_.fps, config_.max_free_fps);
       controller.setCurrentShutter(cc.shutter_ms);
       controller.setCurrentGain(cc.gain_db);
-      cam->setFPS(fps_);
+      cam->setFPS(fps_, freqTol, minDelay, maxDelay, window);
       cam->camera().StartCapture();
     }
   }
