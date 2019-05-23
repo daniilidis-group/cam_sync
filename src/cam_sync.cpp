@@ -502,10 +502,12 @@ namespace cam_sync {
       if (!frame->isValid) {
         continue;
       }
-      if (rotateImage_) {
-        curCam->publishMsg(rotate_image(frame->msg), frame->metaData);
-      } else {
-        curCam->publishMsg(frame->msg, frame->metaData);
+      if (curCam->getNumSubscribers() > 0) {
+        if (rotateImage_) {
+          curCam->publishMsg(rotate_image(frame->msg), frame->metaData);
+        } else {
+          curCam->publishMsg(frame->msg, frame->metaData);
+        }
       }
     }
     ROS_INFO_STREAM("frame publish thread done!");
