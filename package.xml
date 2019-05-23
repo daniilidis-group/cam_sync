@@ -20,8 +20,4 @@
   <depend>message_filters</depend>
   <depend>image_transport</depend>
   <depend>cv_bridge</depend>
-
-  <export>
-    <nodelet plugin="${prefix}/nodelet_plugin.xml"/>
-  </export>
 </package>
