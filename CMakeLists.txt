@@ -19,8 +19,8 @@ add_message_files(DIRECTORY msg FILES MetaData.msg)
 generate_messages(DEPENDENCIES std_msgs)
 
 generate_dynamic_reconfigure_options(
-  cfg/CamSyncDynConfig.cfg
-  cfg/ExposureControlDynConfig.cfg
+  cfg/CamSyncDyn.cfg
+  cfg/ExposureControlDyn.cfg
 )
 
 include_directories(
