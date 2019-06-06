@@ -21,6 +21,8 @@
 #include <iomanip>
 #include <algorithm>
 #include <exception>
+#include <thread>
+#include <chrono>
 
 
 //#define SIMULATE_FRAME_DROPS
@@ -145,9 +147,9 @@ namespace cam_sync {
   void CamSync::Cam::setFPS(double f, double freqTol,
                             double minDelay, double maxDelay, double window) {
     fps_ = f;
-    SetTopicDiagnosticParameters(fps_ * (1.0 - freqTol),
-                                 fps_ * (1.0 + freqTol),
-                                 window, minDelay/f, maxDelay/f);
+    SetTopicDiagnosticParameters(
+      fps_ * (1.0 - freqTol), fps_ * (1.0 + freqTol),
+      window, minDelay / fps_, maxDelay / fps_);
   }
   
   bool
@@ -562,6 +564,20 @@ namespace cam_sync {
     return (gotValidFrame);
   }
 
+  void CamSync::softwareTriggerThread() {
+    const std::chrono::microseconds waitTime((int)(1e6 / fps_));
+    while (ros::ok() && keepPolling_) {
+      for (const auto &cam: cameras_) {
+        // should we use RequestSingle() or FireSofwareTrigger()?
+        // RequestSingle() first waits for the
+        // trigger to be available
+        //cam->camera().RequestSingle();
+        cam->camera().FireSoftwareTrigger();
+      }
+      std::this_thread::sleep_for(waitTime);
+    }
+  }
+
   void CamSync::timeStampThread() {
     std::ofstream tsFile;
     lastLogTime_ = WallTime::now();
@@ -648,6 +664,7 @@ namespace cam_sync {
       nh_.param<double>(diag + "/min_delay", minDelay, -1.0);
       nh_.param<double>(diag + "/max_delay", maxDelay,  2.0);
       nh_.param<double>(diag + "/window",  window,  10.0);
+      nh_.param<int>(diag + "/trigger_source",  cc.trigger_source,  cc.trigger_source);
       if (i == masterCamIdx_) {
         cc.trigger_source = -1; // free running
         cc.enable_output_voltage = 0; // once used for blackfly
@@ -658,6 +675,7 @@ namespace cam_sync {
         cc.trigger_mode   = 14;  // overlapped processing
       }
       cam->Stop();
+      ROS_INFO_STREAM("configuring cam " << i << " trigger mode: "<< cc.trigger_mode);
       cam->camera().Configure(cc);
       cam->camera().SetEnableTimeStamps(true);
       auto &controller = *cam->getExposureController();
@@ -686,6 +704,12 @@ namespace cam_sync {
         timeStampThread_ =
           boost::make_shared<boost::thread>(&CamSync::timeStampThread, this);
       }
+      if (config_.use_software_trigger &&
+          !softwareTriggerThread_) {
+        softwareTriggerThread_ =
+          boost::make_shared<boost::thread>(
+            &CamSync::softwareTriggerThread, this);
+      }
       return (true);
     }
     return (false);
@@ -709,6 +733,10 @@ namespace cam_sync {
       if (timeStampThread_) {
         timeStampThread_->join();
         timeStampThread_.reset();
+      }
+      if (softwareTriggerThread_) {
+        softwareTriggerThread_->join();
+        softwareTriggerThread_.reset();
       }
       // must stop capture afterwards!
       for (auto &cam : cameras_) {

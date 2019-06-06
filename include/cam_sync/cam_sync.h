@@ -153,6 +153,7 @@ public:
     inline bool timeStatsInitialized() const {
       return (lastArrivalTime_ != WallTime(0) && fps_ > 0);
     }
+    int     getId() const { return (id_); }
     void    setCameraTime(const WallTime &t) { cameraTime_ = t; }
     void    initializeTimeStats(const CameraFrame &f);
     void    updateImageTime(const CameraFramePtr &fp);
@@ -196,6 +197,7 @@ public:
   using CamPtr = boost::shared_ptr<Cam>;
 
 private:
+  void softwareTriggerThread();
   void timeStampThread();
   void frameGrabThread(int camIndex);
   void framePublishThread(int camIndex);
@@ -234,6 +236,7 @@ private:
   // threads for frame grabbing, time keeping, and publishing
   std::vector<ThreadPtr>   frameGrabThreads_;
   std::vector<ThreadPtr>   framePublishThreads_;
+  ThreadPtr                softwareTriggerThread_;
   ThreadPtr                timeStampThread_;
 };
   
