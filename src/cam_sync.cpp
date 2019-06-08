@@ -568,11 +568,15 @@ namespace cam_sync {
     ros::Rate trigger_rate(fps_);
     while (ros::ok() && keepPolling_) {
       for (const auto &cam: cameras_) {
-        // should we use RequestSingle() or FireSofwareTrigger()?
+        // Should we use RequestSingle() or FireSofwareTrigger()?
         // RequestSingle() first waits for the
-        // trigger to be available
+        // trigger to be available, so that will hold up triggering
+        // of the other cameras.
         //cam->camera().RequestSingle();
         cam->camera().FireSoftwareTrigger();
+        // Firing the cameras in parallel with separate threads
+        // did not show any improvement. Likely the driver is
+        // serializing on the FireSoftwareTrigger().
       }
       trigger_rate.sleep();
     }
