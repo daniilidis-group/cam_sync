@@ -565,7 +565,7 @@ namespace cam_sync {
   }
 
   void CamSync::softwareTriggerThread() {
-    const std::chrono::microseconds waitTime((int)(1e6 / fps_));
+    ros::Rate trigger_rate(fps_);
     while (ros::ok() && keepPolling_) {
       for (const auto &cam: cameras_) {
         // should we use RequestSingle() or FireSofwareTrigger()?
@@ -574,7 +574,7 @@ namespace cam_sync {
         //cam->camera().RequestSingle();
         cam->camera().FireSoftwareTrigger();
       }
-      std::this_thread::sleep_for(waitTime);
+      trigger_rate.sleep();
     }
   }
 
