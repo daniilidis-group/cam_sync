@@ -130,11 +130,13 @@ public:
   typedef std::shared_ptr<CameraFrame> CameraFramePtr;
 
   struct FrameQueue {
-    FrameQueue(int ida=0) : id(ida) {};
-    void            addFrame(const CameraFramePtr &f);
+    FrameQueue(int ida = 0, int maxQ = 50) :
+      id(ida), maxQueueSize(maxQ) {};
+    int             addFrame(const CameraFramePtr &f);
     CameraFramePtr  waitForNextFrame(bool *keepRunning);
     // 
     int         id;
+    int         maxQueueSize;
     std::mutex  mutex;
     std::condition_variable  cv;
     std::deque<CameraFramePtr> frames;
@@ -155,6 +157,8 @@ public:
     }
     int     getId() const { return (id_); }
     void    setCameraTime(const WallTime &t) { cameraTime_ = t; }
+    void    setFrameQueueSize(int qs) { frames_.maxQueueSize = qs; }
+    int     addFrame(const CameraFramePtr &fp);
     void    initializeTimeStats(const CameraFrame &f);
     void    updateImageTime(const CameraFramePtr &fp);
     double  gotNewFrame(const CameraFrame &f, double dtA, int *nframes);
@@ -192,6 +196,7 @@ public:
     bool          debug_{true};
     double        arrivalToCameraTimeCoeff_{0.005};
     std::ofstream debugFile_;
+    int           maxQueueSize_{0};
   };
 
   using CamPtr = boost::shared_ptr<Cam>;
@@ -220,6 +225,7 @@ private:
   double                   dtVar_{3e-5};
   double                   dtVarThreshold_{0};
   bool                     warmedUp_{false};
+  int                      maxQueueSize_;
 
   std::vector<CamPtr>      cameras_;
   FrameQueue               cameraFrames_; // frames before dispatch

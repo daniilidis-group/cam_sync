@@ -137,11 +137,13 @@ namespace cam_sync {
     const double dropRate = framesDropped_ * 100.0 / frameCount_;
     const double offset   = offset_  * 100.0;
     const double jitter   = std::sqrt(variance_ / frameCount_) * 100.0;
-    ROS_INFO("cam %02d fps: %7.3f drop: %8.4f %%  offset: %7.2f %%"
-             " jitter: %6.2f %%", id_, fps, dropRate, offset, jitter);
+    ROS_INFO("cam %02d fps: %6.2f drop: %8.4f %%  offset: %7.2f %%"
+             " jitter: %6.2f %% q: %3d", id_, fps,
+             dropRate, offset, jitter, maxQueueSize_);
     framesDropped_        = 0;
     frameCount_           = 0;
     variance_             = 0;
+    maxQueueSize_         = 0;
   }
 
   void CamSync::Cam::setFPS(double f, double freqTol,
@@ -215,6 +217,12 @@ namespace cam_sync {
     imageTime_        = f.arrivalTime;
     lastFrameCount_   = f.metaData.embeddedFrameCounter;
     lastCameraClock_  = f.cameraClock;
+  }
+
+  int CamSync::Cam::addFrame(const CameraFramePtr &fp) {
+    const int qs = frames_.addFrame(fp);
+    maxQueueSize_ = std::max(maxQueueSize_, qs);
+    return (qs);
   }
 
   void CamSync::Cam::updateImageTime(const CameraFramePtr &fp) {
@@ -374,10 +382,13 @@ namespace cam_sync {
     return (frame);
   }
 
-  void CamSync::FrameQueue::addFrame(const CameraFramePtr &frame) {
+  int CamSync::FrameQueue::addFrame(const CameraFramePtr &frame) {
     std::unique_lock<std::mutex> lock(mutex);
-    frames.push_front(frame);
+    if (frames.size() <= maxQueueSize) {
+      frames.push_front(frame);
+    }
     cv.notify_all();
+    return (frames.size());
   }
 
   CamSync::CamSync(const ros::NodeHandle& pn)
@@ -390,6 +401,10 @@ namespace cam_sync {
     pn.param<bool>("debug_timestamps", debugTimeStamps_, false);
     double logInterval;
     pn.param<double>("logging_interval", logInterval, 60.0);
+    pn.param<int>("max_global_frame_queue_size",
+                  cameraFrames_.maxQueueSize, 1000);
+    int camQS(0);
+    pn.param<int>("per_camera_queue_size", camQS, 100);
     logInterval_ = WallDuration(logInterval);
     double fps(30.0);
     pn.getParam("fps", fps);
@@ -419,6 +434,8 @@ namespace cam_sync {
       pn.setParam(camName + "/calib_url", calibDir + "/" + calibfn);
       CamPtr camTmp = boost::make_shared<Cam>(nh_, i, lagThresh, atctc,
                                               debugTimeStamps_, camName);
+      
+      camTmp->setFrameQueueSize(camQS);
       cameras_.push_back(move(camTmp));
     }
     configServer_->setCallback(boost::bind(&CamSync::configure, this, _1, _2));
@@ -593,7 +610,13 @@ namespace cam_sync {
           // got valid frame, dispatch it to respective camera
           frame->setMessageTimeStamp(frameTime);
           // move frame to camera thread
-          cameras_[frame->cameraId]->getFrames().addFrame(frame);
+          Cam &cam = *cameras_[frame->cameraId];
+          const int qs = cam.addFrame(frame);
+          if (qs > 10) {
+            ROS_WARN_STREAM_THROTTLE(
+              10, "cam " << frame->cameraId <<
+              " has queue size: " << qs);
+          }
         }
         const WallTime t = WallTime::now();
         if (t > lastLogTime_ + logInterval_) {
@@ -601,6 +624,8 @@ namespace cam_sync {
           for (const auto &cam: cameras_) {
             cam->logStats((t - lastLogTime_).toSec());
           }
+          ROS_INFO_STREAM(" max global frame queue size: " << maxQueueSize_);
+          maxQueueSize_ = 0;
           lastLogTime_ = t;
         }
       }
@@ -631,7 +656,8 @@ namespace cam_sync {
         const double imgTime = get_pgr_timestamp(pgrImage);
         CameraFramePtr fp(new CameraFrame(camIndex, ret, grabTime, arrTime,
                                           imgTime, md, image_msg));
-        cameraFrames_.addFrame(fp);
+        const auto qs = cameraFrames_.addFrame(fp);
+        maxQueueSize_ = std::max(maxQueueSize_, qs);
 
         // update exposure control
         double newShutter(-1.0), newGain(-1.0);
